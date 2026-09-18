@@ -49,7 +49,10 @@ Notes:
 $notesFile = [System.IO.Path]::GetTempFileName()
 try {
   Set-Content -Path $notesFile -Value $notes -Encoding UTF8
-  gh release create $Tag $Exe .\.env.example --repo $Repo --title "KaraokeGen $Tag" --notes-file $notesFile
+  # Exe only: gh mangles dotfile asset names (".env.example" becomes
+  # "default.env.example"), and exe users never need it — devs get it from
+  # the repo. One asset, correctly named.
+  gh release create $Tag $Exe --repo $Repo --title "KaraokeGen $Tag" --notes-file $notesFile
   if ($LASTEXITCODE -ne 0) { throw "gh release create failed (exit $LASTEXITCODE)" }
 } finally {
   Remove-Item $notesFile -ErrorAction SilentlyContinue

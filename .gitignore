@@ -1,0 +1,113 @@
+# --- Runtime / Colab work dirs ---
+**/karaokegen_work/
+**/karaokegencollab_work/
+**/pysync_work/
+temp/
+**/temp/
+.video_cache/
+
+# --- Generated outputs (never commit renders) ---
+*.mp4
+*.mp3
+*.ass
+*.wav
+*.part
+*.zip
+# --- Built desktop exe (rebuild with .\build_exe.ps1, never commit binaries) ---
+/KaraokeGen.exe
+/_internal/
+KaraokeGen.spec
+local_app/static/build.json
+# --- Benchmark history (local only, never published) ---
+EXPERIMENT_LEDGER.txt
+benchmark_word/
+corpus/
+
+# --- Downloaded model weights ---
+*.onnx
+*.pt
+*.bin
+*.ckpt
+*.safetensors
+deps/
+**/deps/
+**/models/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- IDE / editors ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.code-workspace
+
+# --- OS artifacts ---
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+$RECYCLE.BIN/
+
+# --- Logs / coverage ---
+*.log
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Secrets / env (keep .env.example tracked) ---
+.env
+.env.*
+!.env.example
+
+# --- Jupyter checkpoints ---
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# --- Local tooling (Kilo / Node) ---
+.kilo/
+.commandcode/
+.freebuff/
+node_modules/
+**/node_modules/
+
+# --- Vendored third-party clone (clone manually — see README setup) ---
+LyricsAlignment-Multilingual/
+
+# --- Editor backups ---
+*.bak
+
+# --- Research (local only, never upload to GitHub) ---
+# Full word-timing campaign: frozen truth, manifests, pred evidence, ledger.
+# Method scripts to reproduce it live in tools/ (also ignored below).
+benchmark_word/
+# V1 line-campaign fixtures (unreferenced by product code).
+corpus/
+# One-off Modal experiment runners (history preserved locally).
+modal_*.py
+!modal_app.py
+# Owner workflow notes (personal) + superseded timing history.
+rules.md
+TIMING_NOTES.md
+# Benchmark/probe tooling (product needs only run_draft + eval_timing).
+tools/*
+!tools/__init__.py
+!tools/eval_timing.py
+!tools/run_draft.py

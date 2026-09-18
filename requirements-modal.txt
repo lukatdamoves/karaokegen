@@ -1,0 +1,18 @@
+# Baked into the Modal image (GPU deps). Do NOT install locally.
+# NOTE: this file documents the GPU image; the AUTHORITATIVE pins live in
+# modal_app.py's image definition. Keep the two in sync when changing.
+modal>=1.0
+# ==0.44.5: newer releases silently drop the 3-stem instrumental
+audio-separator[gpu]==0.44.5
+stable-ts[fw]>=2.19,<3
+faster-whisper
+# ==4.49.0: CVE torch.load block breaks Khalsuu .bin on torch<2.6
+transformers==4.49.0
+librosa
+pyyaml
+# <2.5: librosa -> numba requires numpy<=2.4 (import error on 2.5 silently
+# disables every onset helper)
+numpy>=2,<2.5
+pydantic<2
+fastapi[standard]
+torch==2.4.1

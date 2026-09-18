@@ -1,0 +1,9 @@
+# Desktop-exe extras only (not needed for `uvicorn local_app.server:app` dev).
+# Install: pip install -r requirements.txt -r requirements-exe.txt
+-r requirements.txt
+pyinstaller>=6
+pywebview>=5
+# <2: the frozen SDK-deploy path uses modal.config._lookup_workspace (private
+# API) with a guarded fallback — cap the major so a 2.x rename can't silently
+# break built exes.
+modal>=1,<2

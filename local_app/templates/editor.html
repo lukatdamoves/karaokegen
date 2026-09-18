@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KaraokeGen Editor</title>
+<link rel="stylesheet" href="/static/style.css?v=line2">
+<script src="/static/wavesurfer.min.js"></script>
+<script src="/static/regions.min.js"></script>
+<!-- Vendored wavesurfer.js (see local_app/static/*.min.js). No CDN fallback by
+     design: third-party script includes are a supply-chain risk, and
+     document.write is blocked under CSP. If WaveSurfer is missing here, the
+     vendored files were not checked out — see README setup. -->
+</head>
+<body>
+<div class="layout">
+  <!-- Jobs sidebar (ChatGPT-style history) -->
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <span class="sidebar-title">Jobs</span>
+      <button id="btn-new-side" class="btn-new-side" title="Start a new job">+ New</button>
+    </div>
+    <div id="job-list" class="job-list"></div>
+    <div id="job-empty" class="sidebar-empty" hidden>
+      No jobs yet. Run a draft and it shows up here so you can come back to it later.
+    </div>
+  </aside>
+
+  <div class="main">
+<header>
+  <h1>KaraokeGen</h1>
+  <span class="build-stamp" title="Identifies exactly which build this is">{{ build_stamp }}</span>
+  <span style="flex:1"></span>
+  <button id="btn-config" class="btn-help" title="Settings — Modal URL and key">&#9881;</button>
+  <button id="btn-help" class="btn-help" title="How to use">?</button>
+  <button id="btn-stop-modal" style="background:#8a2a2a;font-size:12px;padding:4px 12px">Stop Modal</button>
+</header>
+
+<!-- Settings / first-run wizard — browser copy-paste, no CLI -->
+<div id="config-overlay" class="config-overlay" {% if not configured %}style="display:flex"{% endif %} {% if configured %}hidden{% endif %}>
+  <div class="config-panel">
+    <button id="cfg-close" class="cfg-close" title="Close">&times;</button>
+    <h3>Modal backend settings</h3>
+    <div id="cfg-current" class="block" style="background:#0b0f1c;border:1px solid #1e2a44;border-radius:6px;padding:8px 10px;font-size:12px;color:#9ab;margin-bottom:10px">Checking connection…</div>
+    <p class="hint">No terminal needed — create a token in your browser, paste it, and the app deploys itself. To switch account, disconnect first then paste the new token.</p>
+    <div class="block" style="background:#0f1626;border:1px solid #1e2a44;border-radius:6px;padding:10px 12px">
+      <div style="font-size:13px;color:#cbd5e1">1. Open <a href="https://modal.com/" target="_blank" class="modal-link">modal.com</a> → sign up / log in → <code>Settings → API Tokens → New Token</code> → copy the whole command it shows:<br><code style="display:block;margin:6px 0;padding:6px;background:#0a0f1e;border-radius:4px;word-break:break-all">modal token set --token-id ak-... --token-secret as-... --profile=...</code></div>
+      <div class="row" style="margin-top:8px"><button id="cfg-open-modal" class="btn-modal">Open Modal dashboard</button><span class="hint">opens in your browser</span></div>
+    </div>
+    <label class="block">Paste the whole command here
+      <input type="text" id="cfg-token-cmd" placeholder="modal token set --token-id ak-... --token-secret as-... --profile=..." style="width:100%">
+    </label>
+    <div class="row" style="margin-top:10px">
+      <button id="cfg-token-save" style="background:#4a6cf7">Save token &amp; Deploy backend</button>
+      <button id="cfg-redeploy" title="Redeploy the backend with your already-saved token (picks up app updates, no paste needed)">Redeploy backend</button>
+      <button id="cfg-disconnect" style="background:#6b1a1a" title="Forget saved URL/key + Modal token so you can switch account">Disconnect</button>
+      <span id="cfg-auto-status" class="hint"></span>
+    </div>
+    <pre id="cfg-deploy-log" class="deploy-log" hidden></pre>
+  </div>
+</div>
+
+<div id="help-overlay" class="help-overlay" hidden>
+  <div class="help-panel">
+    <div class="help-head">
+      <h3>Keyboard shortcuts</h3>
+      <button id="help-close" class="help-close">&times;</button>
+    </div>
+    <div class="help-grid">
+      <span>Play / pause</span><kbd>▶ Play button</kbd>
+      <span>Select + play line</span><kbd>Click a chip</kbd>
+      <span>Select + play word</span><kbd>Click a word chip</kbd>
+      <span>Edit text</span><kbd>Double-click a chip</kbd>
+      <span>Move timing</span><kbd>Drag region body</kbd>
+      <span>Retime edges</span><kbd>Drag region edges</kbd>
+      <span>Jump lines</span><kbd>◀ Prev / Next ▶</kbd>
+      <span>Undo / redo</span><kbd>↩ Undo / ↪ Redo</kbd>
+      <span>Add line</span><kbd>➕ Add line</kbd>
+      <span>Delete line</span><kbd>🗑 Delete</kbd>
+    </div>
+    <p class="hint">Everything is mouse-driven: click a chip to play it, double-click to edit its text, drag region bodies or edges to time them.</p>
+  </div>
+</div>
+
+<!-- Step 1: draft -->
+<section id="step-draft">
+  <h2>1. Draft alignment <small>(runs on Modal GPU)</small></h2>
+  <div id="draft-form">
+  <div class="row">
+    <label>Audio or lyric video: <input type="file" id="audio-file" accept="audio/*,video/*"></label>
+    <label>Song language:
+      <select id="language" title="Tagalog/Taglish: dual-aligner ensemble (LA + CTC words). English: plain whisper pipeline. English songs are also auto-detected from the lyrics when Tagalog is selected.">
+        <option value="tl" selected>Tagalog / Taglish</option>
+        <option value="en">English</option>
+        <option value="">Auto-detect</option>
+      </select>
+    </label>
+    <label>Song genre:
+        <select id="genre" title="Required: picks the word-timing engine. Hiphop / R&B runs the MMS-FA engine. Ballad / Pop runs the mms-1b engine.">
+          <option value="hiphop" selected>Hiphop / R&B</option>
+          <option value="ballad">Ballad / Pop</option>
+        </select>
+      </label>
+    <label>Song starts at:
+      <input type="text" id="song-start" size="7" placeholder="0:00" autocomplete="off"
+             title="Live recordings: the timestamp where the song itself begins (e.g. 0:45). Everything before it — talking, mic checks, banter — is skipped before any timing runs, so no lyric line can latch onto the intro. The intro still plays in the rendered MP4. Blank = the song starts at 0:00.">
+    </label>
+  </div>
+  <p class="hint" id="intro-explain">
+    <b>Live recording?</b> Put the timestamp where the singing really starts in
+    <b>Song starts at</b> (e.g. <code>0:45</code>). The intro is skipped before any
+    timing runs, so the karaoke can't latch onto the talking — and the transcript
+    won't contain it either. Leave it blank when the song starts at 0:00.
+  </p>
+  <label class="block">Official lyrics (optional, one line per row):
+    <textarea id="lyrics" rows="14" placeholder="Paste official lyrics here, or leave blank to transcribe first — you'll fix the text before any timing runs (English songs use Qwen3-ASR; Tagalog uses Whisper)"></textarea>
+  </label>
+  <p class="hint" id="asr-explain" style="display:none">
+    Even with official lyrics, the AI transcribes the vocals first to find where each word
+    is sung in the audio. It then anchors your lyrics to those timestamps. This is normal and
+    necessary — without it, the system has no way to know when each word occurs.
+  </p>
+  <p class="hint" id="video-explain">
+    Uploading a <b>lyric video</b> (MP4 with lyrics burned in) works too: the vocals
+    are separated from the instrumental, and the instrumental is put back onto your
+    <b>original video</b> — the on-screen lyrics stay, the singer's voice is gone.
+    The result is ready for download as soon as separation finishes (no editing).
+  </p>
+  <div id="draft-review" hidden>
+    <audio id="transcript-audio" controls title="Your uploaded audio" style="width:100%"></audio>
+  </div>
+  <button id="btn-draft" disabled>
+    <span id="draft-spinner" class="spinner" hidden></span>
+    <span id="draft-btn-label">Run draft</span>
+  </button>
+  </div>
+
+  <div id="status" class="status">ready</div>
+
+  <div id="progress-bar" class="progress-box" hidden>
+    <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+    <div class="progress-meta">
+      <span id="progress-text" class="progress-text">Waiting...</span>
+      <span id="progress-elapsed" class="progress-elapsed"></span>
+    </div>
+    <div id="stage-timeline" class="stage-timeline"></div>
+    <div id="stage-log" class="stage-log"></div>
+  </div>
+  <p id="draft-slow-note" class="hint" style="display:none;color:#ffa">
+    Drafts are slow by nature: your audio is uploaded, a Modal GPU server is booted,
+    then the vocals are separated from the beat, transcribed, and aligned. The green bar
+    shows the stage. First run after idle can take a few minutes — this is normal.
+  </p>
+</section>
+
+<!-- Transcript review (appears after transcribe-only, before alignment) -->
+<section id="step-transcript" hidden>
+  <h2>Check the transcript <small>(fix the text, then align — word timing comes after)</small></h2>
+  <p class="hint">
+    Transcription is rough — this is your chance to fix it before GPU time is spent on
+    timing. Listen to your <b>original audio</b> above, fix the transcript in the lyrics
+    box, then hit <b>Run alignment</b>.
+  </p>
+  <p class="hint">
+    Live take? If the transcript starts with stage talk ("check check", "what's up guys")
+    rather than the song, <b>delete those lines</b> and put the timestamp where the song
+    really starts in <b>Song starts at</b> (step 1, e.g. <code>0:45</code>) — otherwise the
+    aligner still hears that intro and can pin your first lines onto it.
+  </p>
+  <div class="row transcript-actions">
+    <button id="btn-align" title="Align the edited lyrics (stems cached — skips separation)">Run alignment</button>
+    <span id="transcript-status" class="hint"></span>
+  </div>
+</section>
+
+<!-- Step 2: editor (appears after draft) -->
+<section id="step-edit" hidden>
+  <h2>2. Edit word timings <small>(every word is a draggable region)</small></h2>
+
+  <div id="waveform"></div>
+  <div id="wave-timeline"></div>
+  <div class="controls">
+    <button id="btn-play">&#9654; Play</button>
+    <button id="btn-prev-line" title="Play the previous line">&#9664; Prev</button>
+    <button id="btn-next-line" title="Play the next line">Next &#9654;</button>
+    <span class="spacer"></span>
+    <button id="btn-add-line" title="Insert a new line after the selected one">➕ Add line</button>
+    <button id="btn-del-line" title="Delete the selected line">🗑 Delete</button>
+    <span class="spacer"></span>
+    <button id="btn-undo" title="Undo" disabled>↩ Undo</button>
+    <button id="btn-redo" title="Redo" disabled>↪ Redo</button>
+    <span class="spacer"></span>
+    <label class="ctrl-mini" title="Scroll the line list to follow playback (off = screen stays put)"><input type="checkbox" id="follow-toggle"> Follow</label>
+    <span id="edit-state" class="edit-state"></span>
+     <span class="src-group" title="Vocals are a listening aid while you adjust words — they never reach the MP4">
+       <label class="ctrl-mini"><input type="checkbox" id="voc-toggle" checked> Voc (monitor)</label>
+       <label class="ctrl-mini">Vol <input type="range" id="volume" min="0" max="100" value="100"></label>
+     </span>
+      <span class="src-group" title="Only the 2nd-voice level below is burned into the MP4 (instrumental bed is fixed)">
+        <label class="ctrl-mini"><input type="checkbox" id="sv-toggle" checked> 2nd voice</label>
+       <label class="ctrl-mini">2nd vol <input type="range" id="sv-volume" min="0" max="200" value="100" title="2nd voice volume — preview matches the rendered karaoke video"></label>
+     </span>
+     <span id="audio-loading" class="ctrl-mini" hidden><span class="spinner"></span><span class="audio-loading-label"></span></span>
+      <label class="ctrl-mini">Zoom <input type="range" id="zoom" min="10" max="1000" value="50"></label>
+  </div>
+
+  <div id="line-info" class="line-info">Click a line to select it</div>
+
+  <div id="line-palette" class="line-palette"></div>
+
+  <p class="hint" style="margin-top:4px">
+    Every verse below shows its words separately. Click a <b>word</b> to play just it;
+    <b>double-click a word</b> to fix its wording (Enter saves, Esc cancels);
+    drag a region's <b>body</b> or <b>edges</b> for exact boundaries.
+    Click a verse chip to play the whole line (double-click a verse to retype it).
+    <b>◀ Prev / Next ▶</b> jump between lines.
+    <b>↩ Undo / ↪ Redo</b> reverses edits.<br>
+    <b>Render MP4</b> burns per-word karaoke fill from these timings.
+  </p>
+</section>
+
+<!-- Step 3: render -->
+<section id="step-render" hidden>
+  <h2>3. Render karaoke MP4 <small>(per-word fill, burns on Modal — named after your file)</small></h2>
+  <div class="row">
+    <label>Background: <input type="color" id="bg-color" value="#101010"></label>
+    <button id="btn-render" title="Burn per-word karaoke fill from the timings above">Render MP4</button>
+    <button id="btn-download" disabled>Download</button>
+  </div>
+  <div id="render-progress" hidden>
+    <div class="progress-track"><div id="render-progress-fill" class="progress-fill"></div></div>
+    <div id="render-progress-text" class="progress-text">Waiting...</div>
+  </div>
+</section>
+
+<!-- Lyric-video mode: vocals removed, instrumental remuxed onto the original video -->
+<section id="step-video-done" hidden>
+  <h2>Your karaoke video is ready</h2>
+  <p class="hint">
+    The instrumental was put back on your <b>original lyric video</b> — the on-screen
+    lyrics are untouched, only the singer's voice was removed.
+  </p>
+  <div class="row">
+    <a id="video-download-link" class="btn-link" href="#">Download karaoke video</a>
+  </div>
+</section>
+
+<div id="error" class="error" hidden></div>
+
+  </div><!-- /.main -->
+</div><!-- /.layout -->
+
+<script src="/static/editor.js?v=start10"></script>
+</body>
+</html>

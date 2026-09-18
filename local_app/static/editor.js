@@ -288,11 +288,21 @@ async function loadJob(id) {
 // NOTE: this must NEVER auto-hide the overlay when already configured — the
 // gear icon opens Settings on demand, and auto-hiding made Settings
 // impossible to open after first setup. We only force-SHOW when blocked.
+// Visibility is driven SOLELY by the `hidden` attribute (see editor.html +
+// style.css). Never use inline style.display — it overrides the [hidden]
+// CSS rule and makes the X / backdrop click unable to close the window.
+function setConfigVisible(visible) {
+  const o = $('config-overlay');
+  if (!o) return;
+  // Clear any legacy inline display from older server-rendered HTML
+  // (style="display:flex") so `hidden` actually hides the overlay.
+  o.style.removeProperty('display');
+  o.hidden = !visible;
+}
 async function refreshConfigUI() {
   try {
     const r = await fetch('/api/config');
     const cfg = await r.json();
-    const overlay = $('config-overlay');
     const blocked = !cfg.configured;
     const draftBtn = $('btn-draft');
     if (draftBtn) {
@@ -306,12 +316,11 @@ async function refreshConfigUI() {
         draftBtn.title = '';
       }
     }
-    if (overlay && blocked) overlay.hidden = false;
+    if (blocked) setConfigVisible(true);
     await renderConfigStatus(cfg);
   } catch (e) {
     console.warn('[config] refresh failed', e);
-    const overlay2 = $('config-overlay');
-    if (overlay2) overlay2.hidden = false;
+    setConfigVisible(true);
   }
 }
 // Show current account/connection inside Settings so users can switch accounts.
@@ -401,7 +410,7 @@ async function startDeploy(btn, statusEl, logEl) {
           if (logEl) logEl.textContent += '\nDone.\n';
           const tokenInput = $('cfg-token-cmd'); if (tokenInput) tokenInput.value='';
           await refreshConfigUI();
-          const ov=$('config-overlay'); if(ov) setTimeout(()=>{ if(!$('cfg-token-cmd') || !$('cfg-token-cmd').value) ov.hidden=true; },2500);
+          setTimeout(()=>{ if(!$('cfg-token-cmd') || !$('cfg-token-cmd').value) setConfigVisible(false); },2500);
         } else {
           if (statusEl) { statusEl.textContent = 'Deploy failed: ' + (d.state.error||'see log'); statusEl.style.color='#f88'; }
         }
@@ -435,14 +444,20 @@ async function redeployBackend() {
   }
 }
 on('btn-config', 'click', async () => {
-  const o = $('config-overlay');
-  if (o) o.hidden = false;
+  setConfigVisible(true);
   await refreshConfigUI();
   // refreshConfigUI never auto-hides — re-assert visible in case of race
-  if (o) o.hidden = false;
+  setConfigVisible(true);
 });
-on('cfg-close', 'click', () => { const o=$('config-overlay'); if(o) o.hidden=true; });
-on('config-overlay', 'click', (e) => { if(e.target.id==='config-overlay') e.currentTarget.hidden=true; });
+on('cfg-close', 'click', () => setConfigVisible(false));
+on('config-overlay', 'click', (e) => { if (e.target.id === 'config-overlay') setConfigVisible(false); });
+// Escape also closes Settings (but not the help overlay logic below).
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const o = $('config-overlay');
+    if (o && !o.hidden) setConfigVisible(false);
+  }
+});
 on('cfg-open-modal', 'click', () => window.open('https://modal.com/', '_blank'));
 on('cfg-token-save', 'click', saveTokenAndDeploy);
 on('cfg-redeploy', 'click', redeployBackend);
@@ -461,7 +476,7 @@ on('cfg-disconnect', 'click', async () => {
     if (logEl) { logEl.hidden = true; logEl.textContent = ''; }
     if (statusEl) { statusEl.textContent = 'Disconnected — paste a new token above to switch account.'; statusEl.style.color=''; }
     await refreshConfigUI();
-    const o = $('config-overlay'); if (o) o.hidden = false;
+    setConfigVisible(true);
   } catch (e) {
     if (statusEl) { statusEl.textContent = 'Disconnect failed: ' + e.message; statusEl.style.color='#f88'; }
   }

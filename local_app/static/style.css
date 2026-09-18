@@ -516,7 +516,7 @@ body.word-mode .word-mode-toggle {
   position:fixed;inset:0;background:rgba(0,0,0,0.6);
   display:flex;align-items:center;justify-content:center;z-index:1000;
 }
-.help-overlay[hidden]{display:none;}
+.help-overlay[hidden]{display:none !important;}
 .help-panel{
   background:#16213e;border:1px solid #2a3a5e;border-radius:10px;
   padding:20px 24px;min-width:320px;max-width:90vw;
@@ -540,7 +540,7 @@ body.word-mode .word-mode-toggle {
   position:fixed;inset:0;background:rgba(0,0,0,0.65);
   display:flex;align-items:center;justify-content:center;z-index:1100;
 }
-.config-overlay[hidden]{display:none;}
+.config-overlay[hidden]{display:none !important;}
 .config-panel{
   background:#16213e;border:1px solid #2a3a5e;border-radius:10px;
   padding:22px 24px;min-width:360px;max-width:520px;width:90vw;

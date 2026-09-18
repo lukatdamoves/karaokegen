@@ -37,7 +37,11 @@
 </header>
 
 <!-- Settings / first-run wizard — browser copy-paste, no CLI -->
-<div id="config-overlay" class="config-overlay" {% if not configured %}style="display:flex"{% endif %} {% if configured %}hidden{% endif %}>
+<!-- NOTE: visibility is controlled ONLY by the `hidden` attribute (CSS uses
+     display:flex when visible, display:none when hidden). Do NOT add an inline
+     style="display:..." here — inline styles override the [hidden] rule and
+     make the X / backdrop click unable to close the window. -->
+<div id="config-overlay" class="config-overlay" {% if configured %}hidden{% endif %}>
   <div class="config-panel">
     <button id="cfg-close" class="cfg-close" title="Close">&times;</button>
     <h3>Modal backend settings</h3>

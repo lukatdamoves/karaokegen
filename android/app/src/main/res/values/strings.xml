@@ -12,10 +12,9 @@
     <string name="genre_label">Genre</string>
     <string name="genre_hiphop">Hiphop / R&amp;B</string>
     <string name="genre_ballad">Ballad / Pop</string>
-    <string name="get_audio">Get audio</string>
+    <string name="start">Start</string>
 
     <string name="audio_ready">Audio ready.</string>
-    <string name="continue_to_draft">Continue to draft</string>
     <string name="cancel_draft">Cancel draft</string>
     <string name="backend_settings">Backend settings</string>
     <string name="copy_logs">Copy logs</string>

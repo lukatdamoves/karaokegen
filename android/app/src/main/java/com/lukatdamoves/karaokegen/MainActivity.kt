@@ -21,16 +21,16 @@ import java.io.File
 import java.io.IOException
 
 /**
- * KaraokeGen trial, v0.1: paste a YouTube link -> download the audio ->
- * send it to the Modal backend as a draft (with lyrics, or transcribe).
- * The editor and render come later. Update check runs silently on launch.
+ * KaraokeGen trial: paste a YouTube link -> one Start button does the whole
+ * thing (download the audio, then draft it on the Modal backend — with
+ * lyrics, or transcribe when the lyrics box is empty). The editor and
+ * render come later. Update check runs silently on launch.
  */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
 
-    private var audioFile: File? = null
-    private var draftJob: Job? = null
+    private var flowJob: Job? = null
     private var currentJobId: String? = null
     private var pendingUpdate: UpdateManager.UpdateInfo? = null
 
@@ -39,13 +39,12 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.getAudioButton.setOnClickListener { onGetAudio() }
-        binding.continueButton.setOnClickListener { onContinueToDraft() }
-        binding.cancelButton.setOnClickListener { onCancelDraft() }
-        binding.copyLogsButton.setOnClickListener { onCopyLogs() }
+        binding.startButton.setOnClickListener { onStart() }
+        binding.cancelButton.setOnClickListener { onCancel() }
         binding.settingsButton.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
+        binding.copyLogsButton.setOnClickListener { onCopyLogs() }
         binding.updateButton.setOnClickListener { onUpdateTapped() }
         binding.updateLaterButton.setOnClickListener {
             binding.updateCard.visibility = View.GONE
@@ -56,7 +55,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        draftJob?.cancel()
+        flowJob?.cancel()
         super.onDestroy()
     }
 
@@ -125,6 +124,10 @@ class MainActivity : AppCompatActivity() {
         AppLog.d("Main", "Logs copied (${logs.length} chars)")
     }
 
+    // ------------------------------------------------------------------
+    // One Start button: link -> audio -> draft/transcribe -> result.
+    // ------------------------------------------------------------------
+
     private fun showError(msg: String) {
         binding.errorText.text = msg
         binding.errorText.visibility = View.VISIBLE
@@ -134,7 +137,16 @@ class MainActivity : AppCompatActivity() {
         binding.errorText.visibility = View.GONE
     }
 
-    private fun onGetAudio() {
+    private fun setRunning(running: Boolean) {
+        binding.startButton.isEnabled = !running
+        binding.cancelButton.visibility = if (running) View.VISIBLE else View.GONE
+        if (!running) {
+            binding.audioProgress.visibility = View.GONE
+            binding.draftProgress.visibility = View.GONE
+        }
+    }
+
+    private fun onStart() {
         val url = binding.urlInput.text?.toString()?.trim().orEmpty()
         if (url.isEmpty()) {
             showError("Paste a YouTube link first.")
@@ -144,17 +156,32 @@ class MainActivity : AppCompatActivity() {
             showError("That doesn't look like a YouTube link.")
             return
         }
+        if (!SettingsStore.isConfigured(this)) {
+            showError("Set up your backend first — open Backend settings and paste your Modal URL and API key.")
+            startActivity(Intent(this, SettingsActivity::class.java))
+            return
+        }
         clearError()
-        binding.getAudioButton.isEnabled = false
+        val lyrics = binding.lyricsInput.text?.toString().orEmpty()
+        // Empty lyrics means "transcribe" automatically.
+        val transcribe = lyrics.isBlank()
+        val genre = if (binding.genreBallad.isChecked) "ballad" else "hiphop"
+        val baseUrl = SettingsStore.getBaseUrl(this)
+        val apiKey = SettingsStore.getApiKey(this)
+
+        setRunning(true)
         binding.audioResult.visibility = View.GONE
-        binding.continueButton.visibility = View.GONE
+        binding.draftResult.visibility = View.GONE
         binding.audioProgress.visibility = View.VISIBLE
         binding.audioProgress.isIndeterminate = true
         binding.audioProgress.progress = 0
         binding.audioStatus.text = "Finding the audio…"
-        AppLog.d("Main", "Get audio: $url")
-        lifecycleScope.launch {
+        binding.draftStatus.text = ""
+        AppLog.d("Main", "Start: $url (transcribe=$transcribe genre=$genre)")
+
+        flowJob = lifecycleScope.launch {
             try {
+                // Step 1: resolve + download the audio.
                 val resolved = YoutubeAudio.resolve(url)
                 AppLog.d("Main", "Resolved: ${resolved.title} (${resolved.durationSec}s, ${resolved.bitrate / 1000} kbps, .${resolved.suffix})")
                 binding.audioStatus.text = "Downloading: ${resolved.title}"
@@ -163,11 +190,11 @@ class MainActivity : AppCompatActivity() {
                     .replace(Regex("[^A-Za-z0-9._-]+"), "_")
                     .take(80)
                     .ifEmpty { "song" }
-                val dest = File(
+                val audioFile = File(
                     getExternalFilesDir(Environment.DIRECTORY_MUSIC),
                     "KaraokeGen/$safeName.${resolved.suffix}"
                 )
-                YoutubeAudio.download(resolved.audioUrl, dest) { done, total ->
+                YoutubeAudio.download(resolved.audioUrl, audioFile) { done, total ->
                     runOnUiThread {
                         if (total > 0) {
                             val pct = (done * 100 / total).toInt()
@@ -177,16 +204,14 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
-                audioFile = dest
-                AppLog.d("Main", "Audio ready: ${dest.length()} bytes -> ${dest.name}")
+                AppLog.d("Main", "Audio ready: ${audioFile.length()} bytes -> ${audioFile.name}")
                 binding.audioProgress.visibility = View.GONE
-                binding.audioStatus.text = getString(R.string.audio_ready)
                 val info = buildString {
                     append(resolved.title)
                     append("\n")
                     append(formatDuration(resolved.durationSec))
                     append(" • ")
-                    append(formatSize(dest.length()))
+                    append(formatSize(audioFile.length()))
                     append(" • ")
                     append(resolved.bitrate / 1000)
                     append(" kbps")
@@ -197,55 +222,15 @@ class MainActivity : AppCompatActivity() {
                 }
                 binding.audioResult.text = info
                 binding.audioResult.visibility = View.VISIBLE
-                binding.continueButton.visibility = View.VISIBLE
-            } catch (e: YoutubeError) {
-                AppLog.e("Main", "Get audio failed: ${e.message}")
-                showError(e.message ?: "Couldn't get that video.")
-                binding.audioProgress.visibility = View.GONE
-                binding.audioStatus.text = ""
-            } catch (e: Exception) {
-                AppLog.e("Main", "Get audio failed: ${e.message}")
-                showError("Couldn't get that video: ${e.message}")
-                binding.audioProgress.visibility = View.GONE
-                binding.audioStatus.text = ""
-            } finally {
-                binding.getAudioButton.isEnabled = true
-            }
-        }
-    }
 
-    // ------------------------------------------------------------------
-    // Step 2: audio -> Modal draft (lyrics) or transcribe (no lyrics).
-    // ------------------------------------------------------------------
-
-    private fun onContinueToDraft() {
-        val file = audioFile ?: return
-        if (!SettingsStore.isConfigured(this)) {
-            showError("Set up your backend first — open Backend settings and paste your Modal URL and API key.")
-            startActivity(Intent(this, SettingsActivity::class.java))
-            return
-        }
-        clearError()
-        val lyrics = binding.lyricsInput.text?.toString().orEmpty()
-        // No checkbox: empty lyrics means "transcribe" automatically.
-        val transcribe = lyrics.isBlank()
-        val genre = if (binding.genreBallad.isChecked) "ballad" else "hiphop"
-        AppLog.d("Main", "Continue to draft: transcribe=$transcribe genre=$genre file=${file.name} (${file.length()} bytes)")
-        val baseUrl = SettingsStore.getBaseUrl(this)
-        val apiKey = SettingsStore.getApiKey(this)
-        binding.continueButton.isEnabled = false
-        binding.getAudioButton.isEnabled = false
-        binding.draftProgress.visibility = View.VISIBLE
-        binding.cancelButton.visibility = View.VISIBLE
-        binding.draftResult.visibility = View.GONE
-        binding.draftStatus.text =
-            if (transcribe) "Uploading audio for transcription…" else "Uploading audio…"
-        draftJob = lifecycleScope.launch {
-            try {
+                // Step 2: send it to the backend (draft or transcribe).
+                binding.draftProgress.visibility = View.VISIBLE
+                binding.draftStatus.text =
+                    if (transcribe) "Uploading audio for transcription…" else "Uploading audio…"
                 val client = ModalClient(baseUrl, apiKey)
                 val submitted = withContext(Dispatchers.IO) {
                     client.submitDraft(
-                        file,
+                        audioFile,
                         language = "", // auto-detect
                         lyrics = if (transcribe) "" else lyrics,
                         genre = genre,
@@ -290,23 +275,26 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
+            } catch (e: YoutubeError) {
+                AppLog.e("Main", "Failed: ${e.message}")
+                showError(e.message ?: "Couldn't get that video.")
+                binding.audioStatus.text = ""
+                binding.draftStatus.text = ""
             } catch (e: ModalError) {
                 AppLog.e("Main", "Draft failed: ${e.message}")
                 showError(e.message ?: "Backend error.")
                 binding.draftStatus.text = ""
             } catch (e: IOException) {
-                AppLog.e("Main", "Draft failed: no backend connection")
+                AppLog.e("Main", "Failed: no connection (${e.message})")
                 showError("Couldn't reach the backend — check the URL and your connection.")
                 binding.draftStatus.text = ""
             } catch (e: Exception) {
-                AppLog.e("Main", "Draft failed: ${e.message}")
-                showError("Draft failed: ${e.message}")
+                AppLog.e("Main", "Failed: ${e.message}")
+                showError("Something went wrong: ${e.message}")
+                binding.audioStatus.text = ""
                 binding.draftStatus.text = ""
             } finally {
-                binding.draftProgress.visibility = View.GONE
-                binding.cancelButton.visibility = View.GONE
-                binding.continueButton.isEnabled = true
-                binding.getAudioButton.isEnabled = true
+                setRunning(false)
             }
         }
     }
@@ -349,9 +337,9 @@ class MainActivity : AppCompatActivity() {
         binding.draftResult.visibility = View.VISIBLE
     }
 
-    private fun onCancelDraft() {
-        draftJob?.cancel()
-        draftJob = null
+    private fun onCancel() {
+        flowJob?.cancel()
+        flowJob = null
         val jobId = currentJobId
         if (jobId != null && SettingsStore.isConfigured(this)) {
             lifecycleScope.launch(Dispatchers.IO) {
@@ -362,7 +350,10 @@ class MainActivity : AppCompatActivity() {
             }
         }
         currentJobId = null
-        binding.draftStatus.text = "Cancelled."
+        setRunning(false)
+        binding.audioStatus.text = "Cancelled."
+        binding.draftStatus.text = ""
+        AppLog.d("Main", "Cancelled by user")
     }
 
     private fun formatDuration(seconds: Long): String {

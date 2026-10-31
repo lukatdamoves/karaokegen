@@ -9,7 +9,10 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="20dp">
+        android:paddingLeft="20dp"
+        android:paddingTop="56dp"
+        android:paddingRight="20dp"
+        android:paddingBottom="20dp">
 
         <!-- In-app update banner (shown only when a newer APK release exists). -->
         <com.google.android.material.card.MaterialCardView
@@ -151,11 +154,11 @@
         </RadioGroup>
 
         <Button
-            android:id="@+id/getAudioButton"
+            android:id="@+id/startButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:text="@string/get_audio" />
+            android:text="@string/start" />
 
         <ProgressBar
             android:id="@+id/audioProgress"
@@ -179,14 +182,6 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:textAppearance="?attr/textAppearanceBodyMedium"
-            android:visibility="gone" />
-
-        <Button
-            android:id="@+id/continueButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="@string/continue_to_draft"
             android:visibility="gone" />
 
         <ProgressBar

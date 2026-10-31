@@ -1,6 +1,11 @@
 package com.lukatdamoves.karaokegen
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request as OkRequest
@@ -20,7 +25,10 @@ import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.StreamType
 import java.io.File
 import java.io.IOException
+import java.io.RandomAccessFile
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.min
 
 /** Plain-language failure from the YouTube step. Shown on screen as-is. */
 class YoutubeError(message: String) : Exception(message)
@@ -137,8 +145,125 @@ object YoutubeAudio {
         )
     }
 
-    /** Download the audio stream to [dest], reporting (downloaded, total) bytes. */
+    /**
+     * Download the audio stream to [dest], reporting (downloaded, total) bytes.
+     *
+     * YouTube throttles a plain single-connection download to ~30 KB/s, so
+     * this downloads in parallel 1 MB Range chunks (4 at a time) — the same
+     * trick the KaraokeNow extension uses. If the server won't do ranges,
+     * it falls back to one plain download.
+     */
     suspend fun download(
+        audioUrl: String,
+        dest: File,
+        onProgress: (downloaded: Long, total: Long) -> Unit
+    ): File = withContext(Dispatchers.IO) {
+        val total = probeTotal(audioUrl)
+        if (total == null || total <= 0L) {
+            AppLog.d("YoutubeAudio", "Range probe failed (total=$total) — plain download")
+            return@withContext downloadPlain(audioUrl, dest, onProgress)
+        }
+        AppLog.d("YoutubeAudio", "Range download: $total bytes in 1MB chunks")
+        val chunkSize = 1024L * 1024L // 1 MB
+        val chunkCount = ((total + chunkSize - 1) / chunkSize).toInt()
+        val downloaded = AtomicLong(0L)
+        val semaphore = Semaphore(4) // 4 chunks at a time
+        dest.parentFile?.mkdirs()
+        try {
+            RandomAccessFile(dest, "rw").use { raf ->
+                raf.setLength(total)
+                coroutineScope {
+                    (0 until chunkCount).map { index ->
+                        async {
+                            semaphore.withPermit {
+                                val start = index * chunkSize
+                                val end = min(start + chunkSize - 1, total - 1)
+                                downloadChunk(audioUrl, start, end, raf, downloaded, total, onProgress)
+                            }
+                        }
+                    }.awaitAll()
+                }
+            }
+        } catch (e: YoutubeError) {
+            throw e
+        } catch (e: IOException) {
+            throw YoutubeError("Download failed — check your connection and try again.")
+        }
+        if (dest.length() != total) {
+            throw YoutubeError("Download came back incomplete. Try again.")
+        }
+        AppLog.d("YoutubeAudio", "Download done: ${dest.length()} bytes")
+        return@withContext dest
+    }
+
+    /** Probe with a 1-byte Range request. Returns the full size if ranges work, else null. */
+    private fun probeTotal(audioUrl: String): Long? {
+        val req = OkRequest.Builder()
+            .url(audioUrl)
+            .header("User-Agent", USER_AGENT)
+            .header("Range", "bytes=0-0")
+            .build()
+        return try {
+            http.newCall(req).execute().use { resp ->
+                if (resp.code != 206) return null
+                // Content-Range: bytes 0-0/<total>
+                resp.header("Content-Range")
+                    ?.substringAfter('/', "")
+                    ?.toLongOrNull()
+            }
+        } catch (e: IOException) {
+            null
+        }
+    }
+
+    /** Download one byte range (retries 3x) and write it at its offset. */
+    private fun downloadChunk(
+        audioUrl: String,
+        start: Long,
+        end: Long,
+        raf: RandomAccessFile,
+        downloaded: AtomicLong,
+        total: Long,
+        onProgress: (Long, Long) -> Unit
+    ) {
+        val expected = (end - start + 1).toInt()
+        var lastError: IOException? = null
+        repeat(3) { attempt ->
+            try {
+                val req = OkRequest.Builder()
+                    .url(audioUrl)
+                    .header("User-Agent", USER_AGENT)
+                    .header("Range", "bytes=$start-$end")
+                    .build()
+                http.newCall(req).execute().use { resp ->
+                    if (resp.code != 206) {
+                        throw YoutubeError("Download failed (HTTP ${resp.code}). Try again.")
+                    }
+                    val body = resp.body ?: throw YoutubeError("Download failed (empty response).")
+                    val bytes = body.bytes() // chunk is 1 MB at most
+                    if (bytes.size != expected) {
+                        throw IOException("Short chunk: got ${bytes.size}, wanted $expected")
+                    }
+                    synchronized(raf) {
+                        raf.seek(start)
+                        raf.write(bytes)
+                    }
+                    val done = downloaded.addAndGet(bytes.size.toLong())
+                    onProgress(done, total)
+                }
+                return
+            } catch (e: YoutubeError) {
+                throw e
+            } catch (e: IOException) {
+                lastError = e
+                AppLog.d("YoutubeAudio", "Chunk $start-$end attempt ${attempt + 1} failed: ${e.message}")
+            }
+        }
+        throw YoutubeError("Download failed — check your connection and try again. (${lastError?.message})")
+    }
+
+    /** Plain single-connection download — only used when ranges aren't supported. */
+    private suspend fun downloadPlain(
         audioUrl: String,
         dest: File,
         onProgress: (downloaded: Long, total: Long) -> Unit

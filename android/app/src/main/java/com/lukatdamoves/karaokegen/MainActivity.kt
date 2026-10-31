@@ -1,5 +1,8 @@
 package com.lukatdamoves.karaokegen
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.Environment
@@ -36,12 +39,10 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.transcribeCheck.setOnCheckedChangeListener { _, checked ->
-            binding.lyricsInput.isEnabled = !checked
-        }
         binding.getAudioButton.setOnClickListener { onGetAudio() }
         binding.continueButton.setOnClickListener { onContinueToDraft() }
         binding.cancelButton.setOnClickListener { onCancelDraft() }
+        binding.copyLogsButton.setOnClickListener { onCopyLogs() }
         binding.settingsButton.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
@@ -109,8 +110,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------------
-    // Step 1: YouTube link -> audio file.
+    // Copy logs — paste them in chat so issues can be fixed.
     // ------------------------------------------------------------------
+
+    private fun onCopyLogs() {
+        val logs = AppLog.snapshot()
+        if (logs.isEmpty()) {
+            Toast.makeText(this, R.string.logs_empty, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("KaraokeGen logs", logs))
+        Toast.makeText(this, R.string.logs_copied, Toast.LENGTH_SHORT).show()
+        AppLog.d("Main", "Logs copied (${logs.length} chars)")
+    }
 
     private fun showError(msg: String) {
         binding.errorText.text = msg
@@ -139,9 +152,11 @@ class MainActivity : AppCompatActivity() {
         binding.audioProgress.isIndeterminate = true
         binding.audioProgress.progress = 0
         binding.audioStatus.text = "Finding the audio…"
+        AppLog.d("Main", "Get audio: $url")
         lifecycleScope.launch {
             try {
                 val resolved = YoutubeAudio.resolve(url)
+                AppLog.d("Main", "Resolved: ${resolved.title} (${resolved.durationSec}s, ${resolved.bitrate / 1000} kbps, .${resolved.suffix})")
                 binding.audioStatus.text = "Downloading: ${resolved.title}"
                 binding.audioProgress.isIndeterminate = false
                 val safeName = resolved.title
@@ -163,6 +178,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 audioFile = dest
+                AppLog.d("Main", "Audio ready: ${dest.length()} bytes -> ${dest.name}")
                 binding.audioProgress.visibility = View.GONE
                 binding.audioStatus.text = getString(R.string.audio_ready)
                 val info = buildString {
@@ -183,10 +199,12 @@ class MainActivity : AppCompatActivity() {
                 binding.audioResult.visibility = View.VISIBLE
                 binding.continueButton.visibility = View.VISIBLE
             } catch (e: YoutubeError) {
+                AppLog.e("Main", "Get audio failed: ${e.message}")
                 showError(e.message ?: "Couldn't get that video.")
                 binding.audioProgress.visibility = View.GONE
                 binding.audioStatus.text = ""
             } catch (e: Exception) {
+                AppLog.e("Main", "Get audio failed: ${e.message}")
                 showError("Couldn't get that video: ${e.message}")
                 binding.audioProgress.visibility = View.GONE
                 binding.audioStatus.text = ""
@@ -208,9 +226,11 @@ class MainActivity : AppCompatActivity() {
             return
         }
         clearError()
-        val transcribe = binding.transcribeCheck.isChecked
         val lyrics = binding.lyricsInput.text?.toString().orEmpty()
+        // No checkbox: empty lyrics means "transcribe" automatically.
+        val transcribe = lyrics.isBlank()
         val genre = if (binding.genreBallad.isChecked) "ballad" else "hiphop"
+        AppLog.d("Main", "Continue to draft: transcribe=$transcribe genre=$genre file=${file.name} (${file.length()} bytes)")
         val baseUrl = SettingsStore.getBaseUrl(this)
         val apiKey = SettingsStore.getApiKey(this)
         binding.continueButton.isEnabled = false
@@ -233,6 +253,7 @@ class MainActivity : AppCompatActivity() {
                     )
                 }
                 currentJobId = submitted.jobId
+                AppLog.d("Main", "Draft submitted: job=${submitted.jobId} draft=${submitted.draftJobId}")
                 binding.draftStatus.text = "Queued — waiting for the GPU…"
                 while (true) {
                     delay(3000)
@@ -254,10 +275,12 @@ class MainActivity : AppCompatActivity() {
                     }
                     when (job.status) {
                         "done" -> {
+                            AppLog.d("Main", "Draft done")
                             showDraftDone(job.result, transcribe)
                             break
                         }
                         "error" -> {
+                            AppLog.e("Main", "Draft error from backend")
                             showError("The draft failed on the backend. Try again.")
                             binding.draftStatus.text = ""
                             break
@@ -268,12 +291,15 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             } catch (e: ModalError) {
+                AppLog.e("Main", "Draft failed: ${e.message}")
                 showError(e.message ?: "Backend error.")
                 binding.draftStatus.text = ""
             } catch (e: IOException) {
+                AppLog.e("Main", "Draft failed: no backend connection")
                 showError("Couldn't reach the backend — check the URL and your connection.")
                 binding.draftStatus.text = ""
             } catch (e: Exception) {
+                AppLog.e("Main", "Draft failed: ${e.message}")
                 showError("Draft failed: ${e.message}")
                 binding.draftStatus.text = ""
             } finally {

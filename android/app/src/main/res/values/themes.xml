@@ -1,10 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Theme matches the KaraokeGen desktop app (local_app/static/style.css):
+         dark navy background, blue primary, light text. -->
     <style name="Theme.KaraokeGen" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">#FFD600</item>
-        <item name="colorOnPrimary">#121212</item>
-        <item name="colorPrimaryContainer">#3A3400</item>
-        <item name="colorSecondary">#FFD600</item>
+        <item name="colorPrimary">@color/kg_primary</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorPrimaryContainer">#23335C</item>
+        <item name="colorOnPrimaryContainer">#E0E0E0</item>
+        <item name="colorSecondary">@color/kg_primary</item>
+        <item name="colorSurface">@color/kg_bg</item>
+        <item name="colorOnSurface">@color/kg_text</item>
+        <item name="colorSurfaceContainer">@color/kg_panel</item>
+        <item name="colorSurfaceContainerHigh">@color/kg_panel</item>
+        <item name="colorOnSurfaceVariant">@color/kg_muted</item>
+        <item name="colorOutline">@color/kg_border</item>
+        <item name="android:windowBackground">@color/kg_bg</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

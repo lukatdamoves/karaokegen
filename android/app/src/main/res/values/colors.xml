@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Desktop palette (local_app/static/style.css): dark navy, blue primary. -->
+    <color name="kg_bg">#14142A</color>
+    <color name="kg_panel">#16213E</color>
+    <color name="kg_input_bg">#0F1626</color>
+    <color name="kg_border">#3A3A5A</color>
+    <color name="kg_border_soft">#26264A</color>
+    <color name="kg_primary">#4A6CF7</color>
+    <color name="kg_primary_dark">#3A5CE7</color>
+    <color name="kg_text">#E0E0E0</color>
+    <color name="kg_muted">#8A9AB8</color>
+    <color name="kg_success">#2ECC71</color>
+    <color name="kg_error">#F88</color>
+</resources>

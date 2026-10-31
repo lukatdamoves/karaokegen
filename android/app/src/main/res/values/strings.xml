@@ -8,8 +8,7 @@
     <string name="youtube_url_label">YouTube link</string>
     <string name="youtube_url_hint">https://www.youtube.com/watch?v=…</string>
     <string name="lyrics_label">Lyrics (optional)</string>
-    <string name="lyrics_hint">Paste the lyrics here. Leave empty and tick “transcribe” to let the cloud write them.</string>
-    <string name="transcribe_instead">No lyrics — transcribe instead</string>
+    <string name="lyrics_hint">Paste the lyrics here. Leave empty and the cloud will write them for you.</string>
     <string name="genre_label">Genre</string>
     <string name="genre_hiphop">Hiphop / R&amp;B</string>
     <string name="genre_ballad">Ballad / Pop</string>
@@ -19,6 +18,9 @@
     <string name="continue_to_draft">Continue to draft</string>
     <string name="cancel_draft">Cancel draft</string>
     <string name="backend_settings">Backend settings</string>
+    <string name="copy_logs">Copy logs</string>
+    <string name="logs_copied">Logs copied — paste them in chat.</string>
+    <string name="logs_empty">Nothing logged yet — try a download first.</string>
 
     <string name="draft_ready_title">Draft ready</string>
     <string name="draft_next_trial">The editor and render come in the next trial — for now this proves the YouTube download and the cloud draft work.</string>

@@ -91,37 +91,36 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:hint="@string/youtube_url_label">
+            android:hint="@string/youtube_url_label"
+            app:placeholderText="@string/youtube_url_hint"
+            app:boxBackgroundColor="@color/kg_input_bg"
+            app:boxStrokeColor="@color/text_input_stroke">
 
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/urlInput"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:inputType="textUri"
-                android:hint="@string/youtube_url_hint" />
+                android:inputType="textUri" />
         </com.google.android.material.textfield.TextInputLayout>
 
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:hint="@string/lyrics_label">
+            android:hint="@string/lyrics_label"
+            app:placeholderText="@string/lyrics_hint"
+            app:boxBackgroundColor="@color/kg_input_bg"
+            app:boxStrokeColor="@color/text_input_stroke">
 
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/lyricsInput"
                 android:layout_width="match_parent"
                 android:layout_height="120dp"
                 android:gravity="top"
-                android:inputType="textMultiLine"
-                android:hint="@string/lyrics_hint" />
+                android:inputType="textMultiLine" />
         </com.google.android.material.textfield.TextInputLayout>
 
-        <CheckBox
-            android:id="@+id/transcribeCheck"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/transcribe_instead" />
+        <!-- No checkbox: leaving lyrics empty means "transcribe" automatically. -->
 
         <TextView
             android:layout_width="wrap_content"
@@ -227,7 +226,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:textColor="#FF8A80"
+            android:textColor="@color/kg_error"
             android:textAppearance="?attr/textAppearanceBodyMedium"
             android:visibility="gone" />
 
@@ -237,6 +236,14 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
             android:text="@string/backend_settings"
+            style="?attr/materialButtonOutlinedStyle" />
+
+        <Button
+            android:id="@+id/copyLogsButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/copy_logs"
             style="?attr/materialButtonOutlinedStyle" />
 
     </LinearLayout>

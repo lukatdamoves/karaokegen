@@ -1,0 +1,54 @@
+name: Deploy Modal setup helper
+
+# Manual trigger only. Deploys the one-time auto-setup helper
+# (server/setup_app.py) that deploys the KaraokeGen backend into a
+# caller's own Modal account from their API token. The helper runs
+# on the maintainer's Modal account; callers' tokens are only ever
+# used for their own deploy.
+#
+# Needs the repo secrets MODAL_TOKEN_ID and MODAL_TOKEN_SECRET
+# (the maintainer's Modal token) — set them in the repo settings
+# before running this workflow.
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install Modal CLI
+        run: pip install "modal==1.6.2" fastapi httpx
+      - name: Deploy setup helper
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          modal deploy server/setup_app.py::setup_app
+      # The helper URL is NOT hardcoded here. Set the repo variable
+      # KARAOKEGEN_SETUP_URL to your deployed helper URL, e.g.
+      # https://<your-workspace>--karaokegen-setup.us-east.modal.run
+      # Without it, the smoke check is skipped (the deploy still
+      # succeeds) and a warning is printed.
+      - name: Smoke check helper health
+        env:
+          KARAOKEGEN_SETUP_URL: ${{ vars.KARAOKEGEN_SETUP_URL }}
+        run: |
+          if [ -z "$KARAOKEGEN_SETUP_URL" ]; then
+            echo "WARNING: vars.KARAOKEGEN_SETUP_URL not set — skipping /health smoke check."
+            exit 0
+          fi
+          echo "Waiting for setup helper /health..."
+          ok=""
+          for i in $(seq 1 40); do
+            code=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 30 "$KARAOKEGEN_SETUP_URL/health" || true)
+            echo "attempt $i: HTTP $code"
+            if [ "$code" = "200" ]; then ok=1; break; fi
+            sleep 15
+          done
+          if [ -z "$ok" ]; then echo "SMOKE CHECK FAILED"; exit 1; fi
+          echo "SMOKE CHECK PASSED:"
+          curl -sL --max-time 30 "$KARAOKEGEN_SETUP_URL/health"

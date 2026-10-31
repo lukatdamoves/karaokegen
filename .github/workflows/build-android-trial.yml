@@ -6,6 +6,10 @@
 # See android/README.md for the keystore setup.
 name: Build Android trial APK
 
+# Needed to create the pre-release and upload the APK asset.
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
 

@@ -43,6 +43,52 @@
                 android:inputType="textUri" />
         </com.google.android.material.textfield.TextInputLayout>
 
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/generate_url_title"
+            android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/generate_url_help"
+            android:textAppearance="?attr/textAppearanceBodyMedium" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:hint="@string/workspace_label"
+            app:placeholderText="@string/workspace_hint"
+            app:boxBackgroundColor="@color/kg_input_bg"
+            app:boxStrokeColor="@color/text_input_stroke">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/workspaceInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="text" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <Button
+            android:id="@+id/generateUrlButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/generate_url"
+            style="?attr/materialButtonOutlinedStyle" />
+
+        <TextView
+            android:id="@+id/generateResult"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:visibility="gone" />
+
         <Button
             android:id="@+id/saveButton"
             android:layout_width="match_parent"

@@ -131,8 +131,8 @@ object YoutubeAudio {
             title = info.name,
             uploader = info.uploaderName ?: "",
             durationSec = info.duration,
-            audioUrl = best.url,
-            suffix = best.format.suffix,
+            audioUrl = best.url ?: throw YoutubeError("No audio stream URL for this video."),
+            suffix = best.format?.suffix ?: "m4a",
             bitrate = best.averageBitrate
         )
     }

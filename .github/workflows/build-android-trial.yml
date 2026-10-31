@@ -63,9 +63,17 @@ jobs:
           ls -la "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK" | head -5
 
-      - name: Upload APK
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: karaokegen-trial-apk
-          path: android/app/build/outputs/apk/release/*.apk
-          if-no-files-found: error
+      - name: Create pre-release and upload APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APK=$(ls android/app/build/outputs/apk/release/*.apk | head -1)
+          echo "APK: $APK"
+          if gh release view v0.1.0-trial >/dev/null 2>&1; then
+            gh release upload v0.1.0-trial "$APK" --clobber
+          else
+            gh release create v0.1.0-trial "$APK" \
+              --title "KaraokeGen Android trial v0.1.0" \
+              --notes "First Android trial: paste a YouTube link, download the audio, draft via your Modal backend. Install once — updates arrive in-app (OTA)." \
+              --prerelease
+          fi

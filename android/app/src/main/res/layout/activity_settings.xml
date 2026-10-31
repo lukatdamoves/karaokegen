@@ -27,10 +27,72 @@
             android:text="@string/settings_help"
             android:textAppearance="?attr/textAppearanceBodyMedium" />
 
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/setup_title"
+            android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/setup_help"
+            android:textAppearance="?attr/textAppearanceBodyMedium" />
+
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:hint="@string/token_label"
+            app:placeholderText="@string/token_hint"
+            app:boxBackgroundColor="@color/kg_input_bg"
+            app:boxStrokeColor="@color/text_input_stroke">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/tokenInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="textMultiLine"
+                android:minLines="2" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <Button
+            android:id="@+id/setupButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/setup_button" />
+
+        <ProgressBar
+            android:id="@+id/setupProgress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:max="100"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/setupStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:visibility="gone" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
+            android:text="@string/paste_title"
+            android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
             android:hint="@string/backend_line_label"
             app:placeholderText="@string/backend_line_hint"
             app:boxBackgroundColor="@color/kg_input_bg"

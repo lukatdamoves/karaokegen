@@ -51,17 +51,10 @@ android {
     }
 }
 
-// Name the APK with its version so the in-app updater can read the
-// versionCode from the release asset name, e.g. karaokegen-0.1.0-trial-vc1.apk
-androidComponents {
-    onVariants { variant ->
-        variant.outputs.forEach { output ->
-            val vn = variant.versionName ?: "0.1.0-trial"
-            val vc = variant.versionCode ?: 1
-            output.outputFileName.set("karaokegen-$vn-vc$vc.apk")
-        }
-    }
-}
+// The APK is renamed by the CI workflow after the build (see
+// .github/workflows/build-android-trial.yml) to
+// karaokegen-<versionName>-vc<versionCode>.apk, so the in-app updater
+// can read the versionCode from the release asset name.
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")

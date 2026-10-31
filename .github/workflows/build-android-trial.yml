@@ -47,6 +47,15 @@ jobs:
           "-Pandroid.injected.signing.key.alias=${{ secrets.ANDROID_KEY_ALIAS }}"
           "-Pandroid.injected.signing.key.password=${{ secrets.ANDROID_KEY_PASSWORD }}"
 
+      - name: Rename APK with version
+        run: |
+          VN=$(grep -m1 'versionName' android/app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
+          VC=$(grep -m1 'versionCode' android/app/build.gradle.kts | grep -o '[0-9]*')
+          echo "versionName=$VN versionCode=$VC"
+          APK=$(ls android/app/build/outputs/apk/release/*.apk | head -1)
+          mv "$APK" "android/app/build/outputs/apk/release/karaokegen-$VN-vc$VC.apk"
+          ls -la android/app/build/outputs/apk/release/
+
       - name: Verify APK signature and version
         run: |
           APK=$(ls android/app/build/outputs/apk/release/*.apk | head -1)

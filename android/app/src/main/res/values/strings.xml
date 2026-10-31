@@ -25,11 +25,12 @@
     <string name="draft_next_trial">The editor and render come in the next trial — for now this proves the YouTube download and the cloud draft work.</string>
 
     <string name="settings_title">Backend settings</string>
-    <string name="settings_help">The draft runs on your Modal backend (the same one the desktop app uses). This app can’t deploy one — paste the URL and API key from your KaraokeGen desktop settings, or from your Modal deploy.</string>
-    <string name="backend_url_label">Backend URL</string>
-    <string name="backend_url_hint">https://your-workspace--karaokegen-api.us-east.modal.run</string>
-    <string name="api_key_label">API key</string>
-    <string name="api_key_hint">The key you set for MODAL_API_KEY</string>
+    <string name="settings_help">The draft runs on your Modal backend (the same one the desktop app uses). This app can’t deploy one. Paste one line: your backend URL and your API key, separated by a space — like the KaraokeNow ReVanced setup.</string>
+    <string name="backend_line_label">Backend URL + API key</string>
+    <string name="backend_line_hint">https://your-workspace--karaokegen-api.us-east.modal.run your-key</string>
+    <string name="backend_line_bad">Paste the backend URL and the API key on one line, like: https://…modal.run your-key</string>
+    <string name="backend_url_bad">The backend URL must start with https://</string>
+    <string name="backend_key_missing">That line has no API key. Paste the URL and the key together, separated by a space.</string>
     <string name="save">Save</string>
     <string name="saved">Saved.</string>
     <string name="check_for_updates">Check for updates</string>

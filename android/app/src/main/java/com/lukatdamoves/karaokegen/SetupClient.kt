@@ -127,7 +127,7 @@ object SetupClient {
     suspend fun pollToDone(
         jobId: String,
         onStatus: (stage: String, progress: Int) -> Unit
-    ): SetupResult = withContext(Dispatchers.IO) {
+    ): SetupResult {
         val startedAt = System.currentTimeMillis()
         var consecutiveNulls = 0
         while (true) {
@@ -147,9 +147,8 @@ object SetupClient {
             consecutiveNulls = 0
             when (status.state) {
                 "done" -> {
-                    val result = getResult(jobId)
+                    return getResult(jobId)
                         ?: throw SetupError("Setup finished but sent no address. Try again.")
-                    return@withContext result
                 }
                 "error" -> {
                     // The helper's error text is plain and safe to show.

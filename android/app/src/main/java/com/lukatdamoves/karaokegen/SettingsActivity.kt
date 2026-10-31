@@ -119,7 +119,7 @@ class SettingsActivity : AppCompatActivity() {
                 binding.setupProgress.visibility = View.GONE
                 binding.savedText.visibility = View.VISIBLE
                 AppLog.d("Settings", "Auto-setup done: ${result.url}")
-                Toast.makeText(this, R.string.setup_done, Toast.LENGTH_LONG).show()
+                Toast.makeText(this@SettingsActivity, R.string.setup_done, Toast.LENGTH_LONG).show()
             } catch (e: SetupError) {
                 AppLog.e("Settings", "Auto-setup failed: ${e.message}")
                 binding.setupStatus.text = e.message ?: getString(R.string.setup_failed)

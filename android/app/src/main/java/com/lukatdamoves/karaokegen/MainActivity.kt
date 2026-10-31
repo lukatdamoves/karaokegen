@@ -39,7 +39,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.startButton.setOnClickListener { onStart() }
+        binding.startButton.setOnClickListener { onStartTapped() }
         binding.cancelButton.setOnClickListener { onCancel() }
         binding.settingsButton.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
@@ -146,7 +146,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun onStart() {
+    private fun onStartTapped() {
         val url = binding.urlInput.text?.toString()?.trim().orEmpty()
         if (url.isEmpty()) {
             showError("Paste a YouTube link first.")

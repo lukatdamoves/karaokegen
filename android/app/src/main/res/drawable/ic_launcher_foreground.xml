@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- A bold "K" in karaoke yellow on dark — trial icon. -->
+    <path
+        android:fillColor="#FFD600"
+        android:pathData="M36,26 L46,26 L46,82 L36,82 Z" />
+    <path
+        android:fillColor="#FFD600"
+        android:pathData="M46,54 L64,26 L74,26 L56,54 Z" />
+    <path
+        android:fillColor="#FFD600"
+        android:pathData="M56,54 L74,82 L64,82 L46,54 Z" />
+</vector>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.KaraokeGen" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">#FFD600</item>
+        <item name="colorOnPrimary">#121212</item>
+        <item name="colorPrimaryContainer">#3A3400</item>
+        <item name="colorSecondary">#FFD600</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

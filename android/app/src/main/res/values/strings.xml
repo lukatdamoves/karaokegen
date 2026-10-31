@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">KaraokeGen</string>
+
+    <string name="main_title">KaraokeGen — trial</string>
+    <string name="main_subtitle">Paste a YouTube link. The app downloads the audio — no file upload needed.</string>
+
+    <string name="youtube_url_label">YouTube link</string>
+    <string name="youtube_url_hint">https://www.youtube.com/watch?v=…</string>
+    <string name="lyrics_label">Lyrics (optional)</string>
+    <string name="lyrics_hint">Paste the lyrics here. Leave empty and tick “transcribe” to let the cloud write them.</string>
+    <string name="transcribe_instead">No lyrics — transcribe instead</string>
+    <string name="genre_label">Genre</string>
+    <string name="genre_hiphop">Hiphop / R&amp;B</string>
+    <string name="genre_ballad">Ballad / Pop</string>
+    <string name="get_audio">Get audio</string>
+
+    <string name="audio_ready">Audio ready.</string>
+    <string name="continue_to_draft">Continue to draft</string>
+    <string name="cancel_draft">Cancel draft</string>
+    <string name="backend_settings">Backend settings</string>
+
+    <string name="draft_ready_title">Draft ready</string>
+    <string name="draft_next_trial">The editor and render come in the next trial — for now this proves the YouTube download and the cloud draft work.</string>
+
+    <string name="settings_title">Backend settings</string>
+    <string name="settings_help">The draft runs on your Modal backend (the same one the desktop app uses). This app can’t deploy one — paste the URL and API key from your KaraokeGen desktop settings, or from your Modal deploy.</string>
+    <string name="backend_url_label">Backend URL</string>
+    <string name="backend_url_hint">https://your-workspace--karaokegen-api.us-east.modal.run</string>
+    <string name="api_key_label">API key</string>
+    <string name="api_key_hint">The key you set for MODAL_API_KEY</string>
+    <string name="save">Save</string>
+    <string name="saved">Saved.</string>
+    <string name="check_for_updates">Check for updates</string>
+    <string name="checking_updates">Checking for updates…</string>
+    <string name="up_to_date">You’re up to date.</string>
+    <string name="update_check_failed">Couldn’t check for updates — check your connection and try again.</string>
+
+    <string name="update_available">Update available</string>
+    <string name="update_now">Update</string>
+    <string name="update_later">Later</string>
+    <string name="update_downloading">Downloading update…</string>
+    <string name="update_install_prompt">Tap Update to download and install. Your data and settings are kept.</string>
+    <string name="update_allow_install">Allow this app to install updates first, then tap Update again.</string>
+</resources>

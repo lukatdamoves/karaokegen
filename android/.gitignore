@@ -1,0 +1,9 @@
+# Android build outputs and secrets — never commit these.
+*.apk
+*.aab
+*.jks
+*.keystore
+local.properties
+/build
+/.gradle
+/app/build

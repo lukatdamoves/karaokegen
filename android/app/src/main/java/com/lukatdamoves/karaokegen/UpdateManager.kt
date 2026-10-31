@@ -77,10 +77,12 @@ object UpdateManager {
         }
 
     /**
-     * Find a newer APK release, or null. Releases are newest-first: the
-     * first APK found decides — if it is not newer than the installed app,
-     * we are up to date; releases without an APK are skipped (desktop-only
-     * releases carry just the .exe).
+     * Find a newer APK release, or null. Releases are newest-first. A
+     * release can carry several APKs (old + new), so we scan every APK
+     * asset and keep the highest versionCode — checking only the first
+     * asset would miss the update when an older APK is listed first.
+     * Releases without an APK are skipped (desktop-only releases carry
+     * just the .exe).
      */
     suspend fun checkForUpdate(context: Context): UpdateInfo? =
         withContext(Dispatchers.IO) {
@@ -91,10 +93,13 @@ object UpdateManager {
                     .header("User-Agent", "KaraokeGen-Android")
                     .build()
                 http.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) return@withContext null
+                    if (!resp.isSuccessful) {
+                        AppLog.d("Update", "Release check failed: HTTP ${resp.code}")
+                        return@withContext null
+                    }
                     val releases = JSONArray(resp.body?.string() ?: return@withContext null)
                     val currentCode = currentVersionCode(context)
-                    val currentName = currentVersionName(context)
+                    var best: UpdateInfo? = null
                     for (i in 0 until releases.length()) {
                         val rel = releases.getJSONObject(i)
                         if (rel.optBoolean("draft")) continue
@@ -106,24 +111,24 @@ object UpdateManager {
                             val url = asset.optString("browser_download_url")
                             if (url.isEmpty()) continue
                             val vc = VC_REGEX.find(name)?.groupValues?.get(1)?.toLongOrNull()
+                                ?: continue // APKs are always named with -vc<code>
                             val vn = versionNameFromAsset(name)
                                 ?: rel.optString("tag_name").removePrefix("v")
-                            val isNewer = if (vc != null) {
-                                vc > currentCode
-                            } else {
-                                vn.isNotEmpty() && vn != currentName
-                            }
-                            return@withContext if (isNewer) {
-                                UpdateInfo(vn, vc ?: -1, url, rel.optString("tag_name"))
-                            } else {
-                                null
+                            if (best == null || vc > best.versionCode) {
+                                best = UpdateInfo(vn, vc, url, rel.optString("tag_name"))
                             }
                         }
-                        // No APK in this release — keep looking at older ones.
                     }
-                    null
+                    if (best != null && best.versionCode > currentCode) {
+                        AppLog.d("Update", "Update found: ${best.versionName} (vc${best.versionCode}), installed vc$currentCode")
+                        best
+                    } else {
+                        AppLog.d("Update", "Up to date (installed vc$currentCode)")
+                        null
+                    }
                 }
             } catch (e: Exception) {
+                AppLog.d("Update", "Release check failed: ${e.message}")
                 null
             }
         }

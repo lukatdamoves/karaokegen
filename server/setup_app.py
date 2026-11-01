@@ -131,6 +131,17 @@ _URL_RE = re.compile(
 # enumerated, so nothing else needs a cleanup pass.
 JOB_TTL_SEC = 7200
 
+# Modal's CLI output is rich-formatted with ANSI colour codes, which can
+# land in the middle of a URL and break a plain regex. Strip them from
+# every deploy line before matching.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes so regexes see the plain text."""
+    return _ANSI_RE.sub("", text)
+
+
 # Modal tokens look like ak-<id> / as-<secret>. Scrub by
 # PATTERN, not by exact value: an error string or a wrapped CLI
 # line may carry a token we never saw verbatim.
@@ -498,7 +509,9 @@ def run_deploy(job_id: str, token_id: str, token_secret: str,
                     continue
                 if raw_line is None:
                     break
-                line = _scrub(raw_line)
+                # Strip ANSI colour codes first (they can split a URL
+                # in the middle and break the regex), then scrub tokens.
+                line = _strip_ansi(_scrub(raw_line))
                 tail.append(line.rstrip())
                 tail = tail[-5:]
                 low = line.lower()

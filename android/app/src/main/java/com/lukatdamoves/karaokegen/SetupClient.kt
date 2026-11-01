@@ -31,7 +31,12 @@ data class SetupStatus(val state: String, val stage: String, val progress: Int)
 object SetupClient {
     // The setup helper lives on the maintainer's Modal account.
     // Deploy it once with: modal deploy server/setup_app.py::setup_app
-    const val HELPER_URL = "https://lukatdamoves--karaokegen-setup.us-east.modal.run"
+    // NOTE: the URL ends in -api because the web endpoint function
+    // is named `api` — Modal names the endpoint after the function,
+    // not the app. The app is karaokegen-setup, the URL is
+    // ...--karaokegen-setup-api.modal.run (same as the ReVanced
+    // helper, which is ...--karaoke-setup-api.modal.run).
+    const val HELPER_URL = "https://lukatdamoves--karaokegen-setup-api.us-east.modal.run"
 
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)

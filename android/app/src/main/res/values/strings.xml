@@ -30,6 +30,16 @@
 
     <string name="draft_ready_title">Draft ready</string>
 
+    <string name="nav_home">Home</string>
+    <string name="nav_editor">Editor</string>
+    <string name="nav_jobs">Jobs</string>
+    <string name="nav_header_subtitle">Turn any song into a karaoke video</string>
+    <string name="drawer_open">Open menu</string>
+    <string name="drawer_close">Close menu</string>
+    <string name="editor_back">← Back</string>
+    <string name="jobs_title">Jobs</string>
+    <string name="jobs_empty">No jobs yet — start a song from Home.</string>
+
     <string name="settings_title">Backend settings</string>
     <string name="settings_help">The draft runs on your Modal backend (the same one the desktop app uses). This app can’t deploy one. Paste one line: your backend URL and your API key, separated by a space — like the KaraokeNow ReVanced setup.</string>
     <string name="setup_title">Set up my backend</string>

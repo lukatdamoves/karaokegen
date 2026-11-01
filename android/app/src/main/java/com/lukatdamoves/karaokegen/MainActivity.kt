@@ -1,14 +1,32 @@
 package com.lukatdamoves.karaokegen
 
+import android.app.DownloadManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Typeface
+import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
+import android.webkit.URLUtil
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.ActionBarDrawerToggle
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.GravityCompat
 import androidx.lifecycle.lifecycleScope
 import com.lukatdamoves.karaokegen.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
@@ -19,12 +37,19 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 /**
- * KaraokeGen trial: paste a YouTube link -> one Start button does the whole
- * thing (download the audio, then draft it on the Modal backend — with
- * lyrics, or transcribe when the lyrics box is empty). The editor and
- * render come later. Update check runs silently on launch.
+ * KaraokeGen trial, one page: paste a YouTube link -> one Start button
+ * does the whole thing (download the audio, then draft it on the Modal
+ * backend — with lyrics, or transcribe when the lyrics box is empty).
+ *
+ * The page has three views, switched by visibility: home (the form),
+ * editor (the desktop editor in a WebView, served from the in-app
+ * localhost server) and jobs (the job queue). The sidebar holds Home,
+ * Editor, Jobs, Backend settings and Copy logs. Update check runs
+ * silently on launch.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -40,34 +65,354 @@ class MainActivity : AppCompatActivity() {
     private var cachedResolved: YoutubeAudio.ResolvedAudio? = null
     private var cachedSendFile: File? = null
 
+    // Editor (inline WebView) state.
+    private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
+    private var webViewSetupDone = false
+    // Draft id currently loaded in the WebView (null = nothing loaded
+    // yet). A repeat open of the same draft does NOT reload the page,
+    // so in-progress edits in the editor survive switching views.
+    private var loadedEditorDraft: String? = null
+    // Last draft shown in the editor, for the sidebar Editor item.
+    private var lastDraftJobId = ""
+    private var lastCallId = ""
+    private var lastSongTitle = ""
+
+    private val fileChooserLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val cb = fileChooserCallback
+        fileChooserCallback = null
+        if (result.resultCode == RESULT_OK) {
+            val data = result.data
+            val uris = mutableListOf<Uri>()
+            data?.data?.let { uris.add(it) }
+            data?.clipData?.let { clip ->
+                for (i in 0 until clip.itemCount) {
+                    clip.getItemAt(i).uri?.let { uris.add(it) }
+                }
+            }
+            cb?.onReceiveValue(uris.toTypedArray())
+        } else {
+            cb?.onReceiveValue(null)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Sidebar (hamburger in the toolbar).
+        setSupportActionBar(binding.toolbar)
+        val drawerToggle = ActionBarDrawerToggle(
+            this, binding.drawerLayout, binding.toolbar,
+            R.string.drawer_open, R.string.drawer_close
+        )
+        binding.drawerLayout.addDrawerListener(drawerToggle)
+        drawerToggle.syncState()
+        binding.navView.setNavigationItemSelectedListener { item ->
+            binding.drawerLayout.closeDrawer(GravityCompat.START)
+            when (item.itemId) {
+                R.id.nav_home -> {
+                    showHome()
+                    true
+                }
+                R.id.nav_editor -> {
+                    openEditorFromDrawer()
+                    true
+                }
+                R.id.nav_jobs -> {
+                    showJobs()
+                    true
+                }
+                R.id.nav_settings -> {
+                    startActivity(Intent(this, SettingsActivity::class.java))
+                    true
+                }
+                R.id.nav_copy_logs -> {
+                    onCopyLogs()
+                    true
+                }
+                else -> false
+            }
+        }
+        binding.navView.setCheckedItem(R.id.nav_home)
+
+        // Lyrics box touch scroll: the lyrics EditText sits inside the
+        // home ScrollView, which steals the drag gesture, so the box
+        // could not be scrolled by touch. While the finger is down on
+        // the box, tell the parent chain not to intercept, so the
+        // EditText scrolls internally; release on lift/cancel.
+        binding.lyricsInput.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE ->
+                    v.parent.requestDisallowInterceptTouchEvent(true)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                    v.parent.requestDisallowInterceptTouchEvent(false)
+            }
+            // False: the EditText still handles the touch itself
+            // (cursor placement, internal scrolling).
+            false
+        }
+
         binding.startButton.setOnClickListener { onStartTapped() }
         binding.cancelButton.setOnClickListener { onCancel() }
-        binding.settingsButton.setOnClickListener {
-            startActivity(Intent(this, SettingsActivity::class.java))
-        }
-        binding.openEditorButton.setOnClickListener {
-            // Resume a previous job in the editor (it restores from its
-            // own saved state), or start fresh from the editor's draft form.
-            startActivity(EditorActivity.newIntent(this))
-        }
-        binding.copyLogsButton.setOnClickListener { onCopyLogs() }
+        binding.editorBackButton.setOnClickListener { showHome() }
         binding.updateButton.setOnClickListener { onUpdateTapped() }
         binding.updateLaterButton.setOnClickListener {
             binding.updateCard.visibility = View.GONE
             pendingUpdate = null
         }
 
+        // Back: close the drawer first; in the editor, go back in the
+        // WebView first; from the editor or jobs, return home.
+        // (Object form, not the lambda overload — that lives in
+        // activity-ktx, which this app does not depend on.)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                when {
+                    binding.drawerLayout.isDrawerOpen(GravityCompat.START) ->
+                        binding.drawerLayout.closeDrawer(GravityCompat.START)
+                    binding.editorView.visibility == View.VISIBLE &&
+                        binding.editorWebView.canGoBack() ->
+                        binding.editorWebView.goBack()
+                    binding.editorView.visibility == View.VISIBLE ||
+                        binding.jobsView.visibility == View.VISIBLE ->
+                        showHome()
+                    else -> {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                    }
+                }
+            }
+        })
+
         checkForUpdateSilently()
     }
 
     override fun onDestroy() {
         flowJob?.cancel()
+        fileChooserCallback?.onReceiveValue(null)
+        fileChooserCallback = null
+        if (isFinishing && webViewSetupDone) {
+            // The server is a singleton; stopping it here frees the
+            // port when the app is really closed (rotation keeps it —
+            // the manifest holds configChanges for this activity).
+            (binding.editorWebView.parent as? ViewGroup)?.removeView(binding.editorWebView)
+            try { binding.editorWebView.destroy() } catch (_: Exception) {}
+            LocalApiServer.stopServer()
+        }
         super.onDestroy()
+    }
+
+    // ------------------------------------------------------------------
+    // Views: home / editor / jobs (one Activity, toggled by visibility).
+    // ------------------------------------------------------------------
+
+    private fun showHome() {
+        binding.editorView.visibility = View.GONE
+        binding.jobsView.visibility = View.GONE
+        binding.homeView.visibility = View.VISIBLE
+        binding.toolbar.title = getString(R.string.app_name)
+        binding.navView.setCheckedItem(R.id.nav_home)
+    }
+
+    private fun showJobs() {
+        binding.homeView.visibility = View.GONE
+        binding.editorView.visibility = View.GONE
+        binding.jobsView.visibility = View.VISIBLE
+        binding.toolbar.title = getString(R.string.jobs_title)
+        binding.navView.setCheckedItem(R.id.nav_jobs)
+        rebuildJobsList()
+    }
+
+    /** Sidebar Editor: resume the last draft if there is one, else
+     *  the editor's own draft form. */
+    private fun openEditorFromDrawer() {
+        if (lastDraftJobId.isNotEmpty()) {
+            showEditor(lastDraftJobId, lastCallId, lastSongTitle)
+            return
+        }
+        val latest = JobStore.getLatestDone(this)
+        if (latest != null) {
+            showEditor(latest.draftJobId, latest.callId, latest.title)
+        } else {
+            showEditor("", "", "")
+        }
+    }
+
+    /** Show the editor view and load the draft (?draft= draft id,
+     *  ?call= Modal call id, ?name= song title). The server seeds those
+     *  into localStorage before editor.js runs, so the editor's own
+     *  resume logic picks the draft up and shows the waveform + word
+     *  regions. Re-opening the same draft does not reload the page. */
+    private fun showEditor(draftJobId: String, callId: String, songTitle: String) {
+        binding.homeView.visibility = View.GONE
+        binding.jobsView.visibility = View.GONE
+        binding.editorView.visibility = View.VISIBLE
+        binding.toolbar.title =
+            songTitle.ifEmpty { getString(R.string.nav_editor) }
+        binding.navView.setCheckedItem(R.id.nav_editor)
+        lastDraftJobId = draftJobId
+        lastCallId = callId
+        lastSongTitle = songTitle
+        if (!webViewSetupDone) {
+            setupEditorWebView()
+            webViewSetupDone = true
+        }
+        if (draftJobId != loadedEditorDraft) {
+            loadEditor(draftJobId, callId, songTitle)
+            loadedEditorDraft = draftJobId
+        }
+    }
+
+    private fun loadEditor(draftJobId: String, callId: String, songTitle: String) {
+        binding.editorLoading.visibility = View.VISIBLE
+        val baseUrl = LocalApiServer.start(this)
+        val editorUrl = Uri.parse(baseUrl).buildUpon().apply {
+            if (draftJobId.isNotEmpty()) appendQueryParameter("draft", draftJobId)
+            if (callId.isNotEmpty()) appendQueryParameter("call", callId)
+            if (songTitle.isNotEmpty()) appendQueryParameter("name", songTitle)
+        }.build().toString()
+        AppLog.d("Main", "loading editor: $baseUrl (draft=$draftJobId)")
+        binding.editorWebView.loadUrl(editorUrl)
+    }
+
+    /** The editor WebView, moved here from the old separate editor
+     *  screen (deleted in v0.2.6 — the editor now lives on this page):
+     *  links stay in-app, external links open in the browser, the
+     *  file chooser is bridged to the document picker, and MP4
+     *  downloads go to DownloadManager in Downloads. */
+    private fun setupEditorWebView() {
+        val webView = binding.editorWebView
+        webView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true // localStorage: job list, alignment edits
+            databaseEnabled = true // IndexedDB: cached audio blobs
+            allowFileAccess = true
+            allowContentAccess = true
+            mediaPlaybackRequiresUserGesture = false
+            cacheMode = WebSettings.LOAD_DEFAULT
+        }
+        webView.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(
+                view: WebView, request: WebResourceRequest
+            ): Boolean {
+                // Keep every link inside the editor (external links open
+                // in the browser instead).
+                val url = request.url.toString()
+                return if (url.startsWith("http://127.0.0.1")) {
+                    false
+                } else {
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW, request.url))
+                    } catch (_: Exception) {
+                    }
+                    true
+                }
+            }
+
+            override fun onPageFinished(view: WebView, url: String) {
+                binding.editorLoading.visibility = View.GONE
+            }
+        }
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                view: WebView,
+                filePathCallback: ValueCallback<Array<Uri>>,
+                fileChooserParams: FileChooserParams
+            ): Boolean {
+                fileChooserCallback?.onReceiveValue(null)
+                fileChooserCallback = filePathCallback
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/*", "video/*"))
+                }
+                return try {
+                    fileChooserLauncher.launch(intent)
+                    true
+                } catch (e: Exception) {
+                    fileChooserCallback = null
+                    false
+                }
+            }
+        }
+        webView.setDownloadListener { url, _, contentDisposition, mimetype, _ ->
+            // The editor's Download button (MP4) — and the lyric-video
+            // link — land here as a localhost /api/file/<id> URL.
+            try {
+                val fileName = URLUtil.guessFileName(url, contentDisposition, mimetype)
+                val req = DownloadManager.Request(Uri.parse(url))
+                    .setMimeType(mimetype)
+                    .setNotificationVisibility(
+                        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                    )
+                    .setDestinationInExternalPublicDir(
+                        Environment.DIRECTORY_DOWNLOADS, fileName
+                    )
+                val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                dm.enqueue(req)
+                AppLog.d("Editor", "download started: $fileName")
+                Toast.makeText(
+                    this, "Downloading $fileName to Downloads…",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } catch (e: Exception) {
+                AppLog.e("Editor", "download failed: ${e.message}")
+                Toast.makeText(
+                    this, "Download failed: ${e.message}",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Jobs view: a simple list, newest first. Tap a row to open that
+    // draft in the editor.
+    // ------------------------------------------------------------------
+
+    private fun rebuildJobsList() {
+        val jobs = JobStore.getAll(this)
+        binding.jobsList.removeAllViews()
+        binding.jobsEmpty.visibility =
+            if (jobs.isEmpty()) View.VISIBLE else View.GONE
+        if (jobs.isEmpty()) return
+        val density = resources.displayMetrics.density
+        val pad = (12 * density).toInt()
+        val dateFmt = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
+        for (job in jobs) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(pad, pad, pad, pad)
+                isClickable = true
+                isFocusable = true
+                setBackgroundResource(android.R.attr.selectableItemBackground)
+                setOnClickListener {
+                    showEditor(job.draftJobId, job.callId, job.title)
+                }
+            }
+            val titleView = TextView(this).apply {
+                text = job.title
+                textSize = 16f
+                setTypeface(Typeface.DEFAULT_BOLD)
+            }
+            val metaView = TextView(this).apply {
+                text = "${jobStatusLabel(job.status)} • ${dateFmt.format(job.timestamp)}"
+                textSize = 13f
+                setTextColor(getColor(R.color.kg_muted))
+            }
+            row.addView(titleView)
+            row.addView(metaView)
+            binding.jobsList.addView(row)
+        }
+    }
+
+    private fun jobStatusLabel(status: String): String = when (status) {
+        "done" -> "Done"
+        "error" -> "Failed"
+        else -> "Running…"
     }
 
     // ------------------------------------------------------------------
@@ -301,6 +646,10 @@ class MainActivity : AppCompatActivity() {
                     )
                 }
                 currentJobId = submitted.jobId
+                JobStore.record(
+                    this@MainActivity, resolved.title,
+                    submitted.draftJobId, submitted.jobId
+                )
                 AppLog.d("Main", "Draft submitted: job=${submitted.jobId} draft=${submitted.draftJobId}")
                 binding.draftStatus.text = "Queued — waiting for the GPU…"
                 // Poll for the result. A single failed poll (a DNS blip,
@@ -351,6 +700,9 @@ class MainActivity : AppCompatActivity() {
                     when (job.status) {
                         "done" -> {
                             AppLog.d("Main", "Draft done")
+                            JobStore.updateStatus(
+                                this@MainActivity, submitted.draftJobId, "done"
+                            )
                             showDraftDone(
                                 job.result, transcribe,
                                 submitted.draftJobId, submitted.jobId,
@@ -361,6 +713,9 @@ class MainActivity : AppCompatActivity() {
                         "error" -> {
                             val detail = job.error.ifBlank { "no detail from backend" }
                             AppLog.e("Main", "Draft error from backend: $detail")
+                            JobStore.updateStatus(
+                                this@MainActivity, submitted.draftJobId, "error"
+                            )
                             showError("The draft failed on the backend: $detail")
                             binding.draftStatus.text = ""
                             break
@@ -382,7 +737,7 @@ class MainActivity : AppCompatActivity() {
             } catch (e: IOException) {
                 AppLog.e("Main", "Failed: no connection (${e.message})")
                 showError("Couldn't reach the backend — check the URL and your connection.")
-                binding.draftStatus.text = ""
+                binding.audioStatus.text = ""
             } catch (e: Exception) {
                 AppLog.e("Main", "Failed: ${e.message}")
                 showError("Something went wrong: ${e.message}")
@@ -396,8 +751,9 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Draft finished.
-     * - With lyrics: the alignment is ready — open the editor (Step 2)
-     *   with this draft, where the user drags word timings and renders.
+     * - With lyrics: the alignment is ready — switch this page to the
+     *   editor (same Activity) with this draft, where the user drags
+     *   word timings and renders.
      * - Transcribe-only: no alignment yet. Put the transcript into the
      *   lyrics box for editing; the user fixes the text and taps Start
      *   (now "Run alignment") to align it. The follow-up /draft reuses
@@ -453,9 +809,7 @@ class MainActivity : AppCompatActivity() {
             " — $lines lines, $words words. Opening the editor…"
         binding.draftResult.visibility = View.VISIBLE
         binding.startButton.text = getString(R.string.start)
-        startActivity(
-            EditorActivity.newIntent(this, draftJobId, callId, songTitle)
-        )
+        showEditor(draftJobId, callId, songTitle)
     }
 
     private fun onCancel() {

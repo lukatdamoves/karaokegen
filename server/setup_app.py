@@ -122,11 +122,11 @@ _image = (
 )
 
 _URL_RE = re.compile(
-    r"https://[a-z0-9-]+--karaokegen-api[a-z0-9.-]*\.modal\.run"
+    r"https://[a-z0-9-]+--karaokengen-api[a-z0-9.-]*\.modal\.run"
 )
 
 # Fallback: the deploy URL is deterministic —
-# https://<workspace>--karaokegen-api.us-east.modal.run — and the
+# https://<workspace>--karaokengen-api.us-east.modal.run — and the
 # "View Deployment" line prints the workspace on every successful
 # deploy, even when the web URL itself is not re-printed (an
 # update of an already-deployed app). Parse the workspace out of
@@ -579,7 +579,7 @@ def run_deploy(job_id: str, token_id: str, token_secret: str,
         if returncode == 0 and not url_found and workspace_found:
             url_found = (
                 f"https://{workspace_found}"
-                "--karaokegen-api.us-east.modal.run"
+                "--karaokengen-api.us-east.modal.run"
             )
         if returncode == 0 and url_found:
             _job_set(job_id, {

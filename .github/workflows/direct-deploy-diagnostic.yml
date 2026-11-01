@@ -30,6 +30,12 @@ jobs:
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: |
           python -c "import secrets; open('.env','w').write('MODAL_API_KEY='+secrets.token_hex(16)+'\n')"
+          # modal_app.py bakes LyricsAlignment-Multilingual into the
+          # image; fetch it first (same zip the helper fetches).
+          curl -sL --max-time 120 -o lyrics-align.zip https://github.com/jhuang448/LyricsAlignment-Multilingual/archive/refs/heads/main.zip
+          unzip -q lyrics-align.zip
+          mv LyricsAlignment-Multilingual-main LyricsAlignment-Multilingual
+          ls -d LyricsAlignment-Multilingual
           echo "=== modal deploy (full output, no truncation) ==="
           python -m modal deploy modal_app.py 2>&1 | tee /tmp/deploy-out.txt
           echo "=== exit: ${PIPESTATUS[0]} ==="

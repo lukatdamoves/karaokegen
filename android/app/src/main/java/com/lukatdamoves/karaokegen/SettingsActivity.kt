@@ -22,6 +22,12 @@ class SettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySettingsBinding
     private var setupJob: Job? = null
+    // In-memory guard against double-taps: set synchronously the
+    // moment setup is tapped, before any network call. The saved job
+    // id covers the long term, but this covers the window between
+    // the tap and the job id being saved (a second tap in that
+    // window would otherwise start a second deploy).
+    private var setupInProgress = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,6 +43,7 @@ class SettingsActivity : AppCompatActivity() {
         val pendingJob = SettingsStore.getSetupJob(this)
         if (pendingJob.isNotEmpty()) {
             AppLog.d("Settings", "Resuming auto-setup job: $pendingJob")
+            setupInProgress = true
             showSetupWatching()
             setupJob = lifecycleScope.launch { runSetupWatch(pendingJob) }
         }
@@ -62,6 +69,16 @@ class SettingsActivity : AppCompatActivity() {
     // ------------------------------------------------------------------
 
     private fun onSetupTapped() {
+        // Double-tap guard: ignore the tap entirely if a setup is
+        // already starting or running. The button is disabled first
+        // thing, so a second tap can't even reach here — this flag is
+        // the backstop for taps that land in the same frame.
+        if (setupInProgress) {
+            AppLog.d("Settings", "Setup tap ignored — already running")
+            return
+        }
+        setupInProgress = true
+        binding.setupButton.isEnabled = false
         // If a setup is already running, just watch that one — don't
         // start a second deploy.
         val pendingJob = SettingsStore.getSetupJob(this)
@@ -75,6 +92,8 @@ class SettingsActivity : AppCompatActivity() {
         val pair = SetupClient.parseTokenCommand(text)
         if (pair == null) {
             Toast.makeText(this, R.string.token_bad, Toast.LENGTH_LONG).show()
+            setupInProgress = false
+            binding.setupButton.isEnabled = true
             return
         }
         val (tokenId, tokenSecret) = pair
@@ -108,6 +127,11 @@ class SettingsActivity : AppCompatActivity() {
                 binding.setupStatus.text = getString(R.string.setup_failed)
                 binding.setupProgress.visibility = View.GONE
                 binding.setupButton.isEnabled = true
+            } finally {
+                // Let the next tap through once this attempt is over.
+                // runSetupWatch also resets it; doing it here covers
+                // the case where startSetup itself failed.
+                setupInProgress = false
             }
         }
     }
@@ -167,6 +191,7 @@ class SettingsActivity : AppCompatActivity() {
             binding.setupProgress.visibility = View.GONE
         } finally {
             binding.setupButton.isEnabled = true
+            setupInProgress = false
         }
     }
 

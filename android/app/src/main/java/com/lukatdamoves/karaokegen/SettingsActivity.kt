@@ -39,6 +39,10 @@ class SettingsActivity : AppCompatActivity() {
 
         binding.setupButton.setOnClickListener { onSetupTapped() }
 
+        // Show whether a backend is already set up (and which one),
+        // so it is obvious at a glance instead of a blank form.
+        refreshBackendStatus()
+
         // A setup that was already running when this screen was left
         // (or the phone locked) keeps going on the helper — resume
         // watching it instead of starting over.
@@ -60,6 +64,16 @@ class SettingsActivity : AppCompatActivity() {
                     else -> getString(R.string.up_to_date)
                 }
             }
+        }
+    }
+
+    /** Show the saved backend (if any) at the top of this screen. */
+    private fun refreshBackendStatus() {
+        val saved = SettingsStore.getBaseUrl(this)
+        binding.backendStatus.text = if (saved.isNotEmpty()) {
+            getString(R.string.backend_ready, saved)
+        } else {
+            getString(R.string.backend_none)
         }
     }
 
@@ -181,6 +195,7 @@ class SettingsActivity : AppCompatActivity() {
             SettingsStore.clearSetupJob(this@SettingsActivity)
             binding.setupStatus.text = getString(R.string.setup_done)
             binding.setupProgress.visibility = View.GONE
+            refreshBackendStatus()
             AppLog.d("Settings", "Auto-setup done: ${result.url}")
             Toast.makeText(this@SettingsActivity, R.string.setup_done, Toast.LENGTH_LONG).show()
         } catch (e: SetupError) {

@@ -28,6 +28,8 @@
     <string name="settings_help">The draft runs on your Modal backend (the same one the desktop app uses). This app can’t deploy one. Paste one line: your backend URL and your API key, separated by a space — like the KaraokeNow ReVanced setup.</string>
     <string name="setup_title">Set up my backend</string>
     <string name="setup_help">Create a free Modal account, then paste the whole token command Modal gives you. Your own KaraokeGen backend is deployed into YOUR Modal account. The token is used once for that deploy and is never saved on this phone. Already set up before? It just reconnects to your existing server, usually under a minute. Brand-new account? The first build takes 5–10 minutes, once only.</string>
+    <string name="backend_ready">Backend ready: %1$s</string>
+    <string name="backend_none">No backend set up yet — paste your Modal token below.</string>
     <string name="token_label">Modal token command</string>
     <string name="token_hint">modal token set --token-id ak-… --token-secret as-…</string>
     <string name="setup_button">Set up my backend</string>

@@ -125,6 +125,17 @@ _URL_RE = re.compile(
     r"https://[a-z0-9-]+--karaokegen-api[a-z0-9.-]*\.modal\.run"
 )
 
+# Fallback: the deploy URL is deterministic —
+# https://<workspace>--karaokegen-api.us-east.modal.run — and the
+# "View Deployment" line prints the workspace on every successful
+# deploy, even when the web URL itself is not re-printed (an
+# update of an already-deployed app). Parse the workspace out of
+# it so a successful deploy is never marked failed just because
+# the URL line was missing from the output.
+_VIEW_DEPLOY_RE = re.compile(
+    r"modal\.com/apps/([a-z0-9-]+)/main/deployed/karaokengen"
+)
+
 # Job entries expire 2h after their last update (a max-length
 # deploy runs ~30 min; 2h leaves time to poll the result). Expired
 # entries are deleted lazily on status read — the Dict is never
@@ -475,6 +486,7 @@ def run_deploy(job_id: str, token_id: str, token_secret: str,
         stage = "Deploying to your Modal account"
         progress = 8
         url_found = None
+        workspace_found = None
         tail: list = []
         # 30-min function timeout (timeout=1800 above): the internal
         # deadline leaves 150s for reaping the child + cleanup.
@@ -532,6 +544,12 @@ def run_deploy(job_id: str, token_id: str, token_secret: str,
                     url_found = match.group(0)
                     stage = "Server address created"
                     progress = max(progress, 92)
+                # The workspace, from the "View Deployment" line —
+                # used to build the URL if the URL line itself
+                # never appears (an update of an existing app).
+                m_ws = _VIEW_DEPLOY_RE.search(line)
+                if m_ws:
+                    workspace_found = m_ws.group(1)
                 _job_set(job_id, {
                     "state": "running", "stage": stage,
                     "progress": progress,
@@ -554,6 +572,15 @@ def run_deploy(job_id: str, token_id: str, token_secret: str,
             except OSError:
                 pass
         returncode = proc.returncode
+        # If the deploy succeeded but the URL line never appeared
+        # (an update of an already-deployed app), build the URL
+        # from the workspace in the "View Deployment" line. The
+        # URL shape is fixed, so this is exact, not a guess.
+        if returncode == 0 and not url_found and workspace_found:
+            url_found = (
+                f"https://{workspace_found}"
+                "--karaokegen-api.us-east.modal.run"
+            )
         if returncode == 0 and url_found:
             _job_set(job_id, {
                 "state": "done", "stage": "Deployed",

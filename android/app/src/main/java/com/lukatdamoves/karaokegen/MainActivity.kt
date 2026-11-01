@@ -289,7 +289,12 @@ class MainActivity : AppCompatActivity() {
                 val submitted = withContext(Dispatchers.IO) {
                     client.submitDraft(
                         sendFile,
-                        language = "", // auto-detect
+                        language = "tl", // Tagalog/Taglish (desktop default).
+                        // "" (auto) is NOT sent: the backend accepts it but
+                        // passes it straight to stable-ts, which requires a
+                        // concrete code and dies with "expected argument for
+                        // language". The backend auto-detects if "tl" is
+                        // wrong for the song, so this is safe.
                         lyrics = if (transcribe) "" else lyrics,
                         genre = genre,
                         transcribeOnly = transcribe

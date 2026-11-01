@@ -31,6 +31,17 @@ object SettingsStore {
     fun isConfigured(context: Context): Boolean =
         getBaseUrl(context).isNotEmpty() && getApiKey(context).isNotEmpty()
 
+    /**
+     * True when the saved backend address uses the old misspelling
+     * ("karaokegen-api" — the app is really "karaokengen-api").
+     * Those addresses never answer (Modal returns "invalid function
+     * call"), so the phone must re-run setup to get the right address
+     * + a fresh key. The correct spelling ("karaokengen-api") does
+     * NOT contain this substring, so it is never flagged.
+     */
+    fun isStaleBackendUrl(url: String): Boolean =
+        "--karaokegen-api" in url
+
     /** The auto-setup job id, saved so a setup survives leaving the
      *  screen (or the phone locking). The deploy keeps running on the
      *  helper even if the phone stops polling — coming back to

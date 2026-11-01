@@ -41,12 +41,34 @@
             android:text="@string/setup_help"
             android:textAppearance="?attr/textAppearanceBodyMedium" />
 
-        <TextView
-            android:id="@+id/backendStatus"
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/backendCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:textAppearance="?attr/textAppearanceBodyMedium" />
+            app:cardBackgroundColor="@color/kg_panel"
+            app:strokeWidth="0dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:id="@+id/backendCardTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="?attr/textAppearanceTitleMedium" />
+
+                <TextView
+                    android:id="@+id/backendCardText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textAppearance="?attr/textAppearanceBodyMedium" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"

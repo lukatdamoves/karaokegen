@@ -67,13 +67,35 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    /** Show the saved backend (if any) at the top of this screen. */
+    /** Show the saved backend (if any) in a big obvious card at the
+     *  top of this screen — green when ready, amber when the saved
+     *  address is the old misspelling and needs reconnecting. */
     private fun refreshBackendStatus() {
         val saved = SettingsStore.getBaseUrl(this)
-        binding.backendStatus.text = if (saved.isNotEmpty()) {
-            getString(R.string.backend_ready, saved)
-        } else {
-            getString(R.string.backend_none)
+        when {
+            saved.isEmpty() -> {
+                binding.backendCard.setCardBackgroundColor(
+                    getColor(R.color.kg_panel))
+                binding.backendCardTitle.text =
+                    getString(R.string.backend_none_title)
+                binding.backendCardText.text =
+                    getString(R.string.backend_none_text)
+            }
+            SettingsStore.isStaleBackendUrl(saved) -> {
+                binding.backendCard.setCardBackgroundColor(
+                    getColor(R.color.kg_warn_bg))
+                binding.backendCardTitle.text =
+                    getString(R.string.backend_stale_title)
+                binding.backendCardText.text =
+                    getString(R.string.backend_stale_text)
+            }
+            else -> {
+                binding.backendCard.setCardBackgroundColor(
+                    getColor(R.color.kg_ready_bg))
+                binding.backendCardTitle.text =
+                    getString(R.string.backend_ready_title)
+                binding.backendCardText.text = saved
+            }
         }
     }
 

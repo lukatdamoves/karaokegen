@@ -12,4 +12,8 @@
     <color name="kg_muted">#8A9AB8</color>
     <color name="kg_success">#2ECC71</color>
     <color name="kg_error">#F88</color>
+    <!-- Backend status card: dark green when ready, dark amber when the
+         saved address needs reconnecting. -->
+    <color name="kg_ready_bg">#14532D</color>
+    <color name="kg_warn_bg">#7C2D12</color>
 </resources>

@@ -50,8 +50,51 @@ class MainActivity : AppCompatActivity() {
             binding.updateCard.visibility = View.GONE
             pendingUpdate = null
         }
+        binding.backendCard.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
 
+        refreshBackendCard()
         checkForUpdateSilently()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // The backend may have been set up (or changed) in Settings —
+        // refresh the card every time this screen comes back.
+        refreshBackendCard()
+    }
+
+    /** Big obvious backend card at the top: green when ready, amber
+     *  when the saved address is the old misspelling and needs a
+     *  reconnect in Settings. Tapping the card opens Settings. */
+    private fun refreshBackendCard() {
+        val saved = SettingsStore.getBaseUrl(this)
+        when {
+            saved.isEmpty() -> {
+                binding.backendCard.setCardBackgroundColor(
+                    getColor(R.color.kg_panel))
+                binding.backendCardTitle.text =
+                    getString(R.string.backend_none_title)
+                binding.backendCardText.text =
+                    getString(R.string.backend_none_text)
+            }
+            SettingsStore.isStaleBackendUrl(saved) -> {
+                binding.backendCard.setCardBackgroundColor(
+                    getColor(R.color.kg_warn_bg))
+                binding.backendCardTitle.text =
+                    getString(R.string.backend_stale_title)
+                binding.backendCardText.text =
+                    getString(R.string.backend_stale_text)
+            }
+            else -> {
+                binding.backendCard.setCardBackgroundColor(
+                    getColor(R.color.kg_ready_bg))
+                binding.backendCardTitle.text =
+                    getString(R.string.backend_ready_title)
+                binding.backendCardText.text = saved
+            }
+        }
     }
 
     override fun onDestroy() {

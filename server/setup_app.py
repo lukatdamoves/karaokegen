@@ -42,6 +42,7 @@ It then lives at https://<workspace>--karaokegen-setup.<region>.modal.run
 
 from __future__ import annotations
 
+import hashlib
 import os
 import queue
 import re
@@ -142,9 +143,21 @@ def _scrub(text: str) -> str:
 
 
 def _job_set(job_id: str, entry: dict) -> None:
-    """Store a job entry, stamped so the TTL can expire it."""
+    """Store a job entry, stamped so the TTL can expire it.
+
+    The token hash (used for dedup) sticks: a progress update that
+    doesn't carry it keeps the one already stored, so a repeat
+    start can still find this running job.
+    """
     entry = dict(entry)
     entry["ts"] = time.time()
+    try:
+        old = jobs.get(job_id)
+    except Exception:
+        old = None
+    if isinstance(old, dict) and old.get("token_hash") \
+            and not entry.get("token_hash"):
+        entry["token_hash"] = old["token_hash"]
     jobs[job_id] = entry
 
 
@@ -152,7 +165,9 @@ def _lookup_job(job_id: str):
     """Return the job entry, or None if missing/expired.
 
     Expired entries are deleted so a stale job id stops resolving.
-    The returned dict is a copy without the internal timestamp.
+    The returned dict is a copy without the internal timestamp and
+    without the token hash (which is only used server-side for
+    dedup and must never be served to a caller).
     """
     entry = jobs.get(job_id)
     if entry is None:
@@ -166,7 +181,43 @@ def _lookup_job(job_id: str):
         return None
     entry = dict(entry)
     entry.pop("ts", None)
+    entry.pop("token_hash", None)
     return entry
+
+
+def _token_hash(token_id: str) -> str:
+    """One-way hash of a token id, for dedup only. The token itself
+    is never stored; the hash lets us tell that two setup starts
+    are for the same Modal account without keeping the token."""
+    return hashlib.sha256(token_id.encode("utf-8")).hexdigest()[:16]
+
+
+def _running_job_for_token(token_hash: str):
+    """The job id of a still-running deploy for this token, if any.
+
+    One running deploy per Modal account: a second start for the
+    same token returns the existing job instead of spawning a
+    duplicate deploy (double-tap, retry, or two phones). The job
+    entry is scanned, not a separate index, so a stale 'running'
+    entry ages out via its timestamp and can't wedge this forever.
+    """
+    try:
+        items = list(jobs.items())
+    except Exception:
+        return None
+    now = time.time()
+    for job_id, entry in items:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("state") != "running":
+            continue
+        if entry.get("token_hash") != token_hash:
+            continue
+        ts = entry.get("ts")
+        if ts is not None and now - ts > JOB_TTL_SEC:
+            continue
+        return job_id
+    return None
 
 
 def _client_ip(request: Request) -> str:
@@ -350,7 +401,8 @@ def _ensure_lyrics_align(deploy_dir: Path) -> None:
 
 
 @setup_app.function(image=_image, timeout=1800)
-def run_deploy(job_id: str, token_id: str, token_secret: str) -> None:
+def run_deploy(job_id: str, token_id: str, token_secret: str,
+               token_hash: str) -> None:
     """Run `modal deploy` with the caller's token; record result.
 
     The token lives only in this call's arguments + the subprocess
@@ -358,12 +410,15 @@ def run_deploy(job_id: str, token_id: str, token_secret: str) -> None:
     A fresh random API key is generated for this backend and written
     to a .env next to modal_app.py, so the backend's
     modal.Secret.from_dotenv() picks it up — the key is never the
-    caller's Modal token.
+    caller's Modal token. The token hash is stored in the job entry
+    (never served to callers) so a repeat start for the same account
+    can find this job instead of spawning a duplicate deploy.
     """
     api_key = secrets.token_hex(16)
     deploy_dir = Path("/root/karaokegen")
     _job_set(job_id, {
         "state": "running", "stage": "Starting deploy", "progress": 3,
+        "token_hash": token_hash,
     })
     try:
         env = dict(os.environ)
@@ -579,11 +634,21 @@ def api():
             return JSONResponse(
                 status_code=400,
                 content={"state": "error", "error": err})
+        # Dedup: one running deploy per Modal account. A repeat start
+        # for the same token (double-tap, retry, second phone) gets
+        # the existing job back instead of spawning a duplicate
+        # deploy that would bill twice and race the first one.
+        token_hash = _token_hash(token_id)
+        existing = _running_job_for_token(token_hash)
+        if existing is not None:
+            return {"job_id": existing, "state": "running",
+                    "resumed": True}
         job_id = uuid.uuid4().hex[:16]
         _job_set(job_id, {
             "state": "running", "stage": "Queued", "progress": 1,
+            "token_hash": token_hash,
         })
-        run_deploy.spawn(job_id, token_id, token_secret)
+        run_deploy.spawn(job_id, token_id, token_secret, token_hash)
         return {"job_id": job_id, "state": "running"}
 
     @web.get("/setup/status/{job_id}")

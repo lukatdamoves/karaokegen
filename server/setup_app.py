@@ -103,7 +103,13 @@ VALIDATE_TIMEOUT_SEC = 45
 _REPO_ROOT = Path(__file__).parent.parent
 _image = (
     modal.Image.debian_slim(python_version="3.12")
-    .pip_install("modal", "fastapi", "anyio", "httpx")
+    # python-dotenv is required: `modal deploy` imports modal_app.py
+    # locally in this container, and the backend's
+    # modal.Secret.from_dotenv() needs it to read the .env we write
+    # (without it the deploy dies immediately with "Need the `dotenv`
+    # package installed"). Same lesson as the ReVanced helper, which
+    # needed httpx for the same reason.
+    .pip_install("modal", "fastapi", "anyio", "httpx", "python-dotenv")
     .add_local_file(
         _REPO_ROOT / "modal_app.py",
         "/root/karaokegen/modal_app.py",

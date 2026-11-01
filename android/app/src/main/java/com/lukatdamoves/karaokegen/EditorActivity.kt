@@ -15,6 +15,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.lukatdamoves.karaokegen.databinding.ActivityEditorBinding
@@ -73,14 +74,18 @@ class EditorActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         // Back goes to the previous editor page first, then exits.
-        onBackPressedDispatcher.addCallback(this) {
-            if (binding.editorWebView.canGoBack()) {
-                binding.editorWebView.goBack()
-            } else {
-                isEnabled = false
-                onBackPressedDispatcher.onBackPressed()
+        // (Object form, not the lambda overload — that lives in
+        // activity-ktx, which this app does not depend on.)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (binding.editorWebView.canGoBack()) {
+                    binding.editorWebView.goBack()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
             }
-        }
+        })
 
         val draftJobId = intent.getStringExtra(EXTRA_DRAFT_JOB_ID).orEmpty()
         val callId = intent.getStringExtra(EXTRA_CALL_ID).orEmpty()

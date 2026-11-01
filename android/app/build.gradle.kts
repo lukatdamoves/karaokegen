@@ -11,10 +11,10 @@ android {
         applicationId = "com.lukatdamoves.karaokegen"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
+        versionCode = 10
         // Trial build. Bump versionCode on EVERY release — the in-app
         // updater compares it against the APK asset on GitHub Releases.
-        versionName = "0.1.8-trial"
+        versionName = "0.1.9-trial"
     }
 
     // Release signing comes from CI-injected properties (see android/README.md).

@@ -11,6 +11,7 @@ object SettingsStore {
     private const val PREFS = "karaokegen_trial"
     private const val KEY_URL = "modal_url"
     private const val KEY_API = "modal_key"
+    private const val KEY_SETUP_JOB = "setup_job_id"
 
     fun getBaseUrl(context: Context): String =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -29,4 +30,24 @@ object SettingsStore {
 
     fun isConfigured(context: Context): Boolean =
         getBaseUrl(context).isNotEmpty() && getApiKey(context).isNotEmpty()
+
+    /** The auto-setup job id, saved so a setup survives leaving the
+     *  screen (or the phone locking). The deploy keeps running on the
+     *  helper even if the phone stops polling — coming back to
+     *  Settings resumes watching the same job. */
+    fun getSetupJob(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_SETUP_JOB, "")?.trim().orEmpty()
+
+    fun saveSetupJob(context: Context, jobId: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_SETUP_JOB, jobId.trim())
+            .apply()
+    }
+
+    fun clearSetupJob(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .remove(KEY_SETUP_JOB)
+            .apply()
+    }
 }

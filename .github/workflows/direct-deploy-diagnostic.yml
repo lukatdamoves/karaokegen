@@ -1,0 +1,39 @@
+# Direct deploy of the KaraokeGen backend with FULL output, to see
+# exactly which functions `modal deploy` creates (especially whether
+# the `api` web function gets a URL). The setup helper only keeps the
+# last 5 output lines, which hides this. Run from Actions ->
+# Direct deploy backend (diagnostic) -> Run workflow. Uses the same
+# MODAL_TOKEN_ID / MODAL_TOKEN_SECRET repo secrets as the deploy
+# workflow. Writes a fresh random MODAL_API_KEY to .env (same as the
+# helper does) — the backend it creates uses that key, so the phone
+# will need a fresh setup afterwards to learn it.
+
+name: Direct deploy backend (diagnostic)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - name: Install Modal CLI
+        run: pip install modal==1.6.2 python-dotenv
+      - name: Deploy modal_app.py (full output)
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          python -c "import secrets; open('.env','w').write('MODAL_API_KEY='+secrets.token_hex(16)+'\n')"
+          echo "=== modal deploy (full output, no truncation) ==="
+          python -m modal deploy modal_app.py 2>&1 | tee /tmp/deploy-out.txt
+          echo "=== exit: ${PIPESTATUS[0]} ==="
+          echo "=== Created Function lines ==="
+          grep -i "created function\|http" /tmp/deploy-out.txt || echo "(none found)"
+          echo "=== apps after deploy ==="
+          modal app list || true

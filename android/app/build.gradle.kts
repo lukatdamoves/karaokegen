@@ -11,11 +11,11 @@ android {
         applicationId = "com.lukatdamoves.karaokegen"
         minSdk = 26
         targetSdk = 35
-        versionCode = 19
+        versionCode = 20
         // Full version (0.2.0): the editor + render, not just the trial
         // draft. Bump versionCode on EVERY release — the in-app
         // updater compares it against the APK asset on GitHub Releases.
-        versionName = "0.2.2-trial"
+        versionName = "0.2.3-trial"
     }
 
     // Release signing comes from CI-injected properties (see android/README.md).

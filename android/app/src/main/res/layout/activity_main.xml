@@ -118,7 +118,7 @@
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/lyricsInput"
                 android:layout_width="match_parent"
-                android:layout_height="120dp"
+                android:layout_height="280dp"
                 android:gravity="top"
                 android:inputType="textMultiLine" />
         </com.google.android.material.textfield.TextInputLayout>

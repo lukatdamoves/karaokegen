@@ -153,6 +153,45 @@
                 android:text="@string/genre_ballad" />
         </RadioGroup>
 
+        <!-- Song language (same three choices as the desktop editor).
+             Auto-detect picks from the lyrics text; it never sends a
+             blank language, because the backend accepts "" but its
+             aligner requires a concrete code and dies on "". -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/language_label"
+            android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+        <RadioGroup
+            android:id="@+id/languageGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/langTagalog"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="@string/lang_tagalog" />
+
+            <RadioButton
+                android:id="@+id/langEnglish"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:text="@string/lang_english" />
+
+            <RadioButton
+                android:id="@+id/langAuto"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:text="@string/lang_auto" />
+        </RadioGroup>
+
         <Button
             android:id="@+id/startButton"
             android:layout_width="match_parent"

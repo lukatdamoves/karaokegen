@@ -12,6 +12,10 @@
     <string name="genre_label">Genre</string>
     <string name="genre_hiphop">Hiphop / R&amp;B</string>
     <string name="genre_ballad">Ballad / Pop</string>
+    <string name="language_label">Song language</string>
+    <string name="lang_tagalog">Tagalog / Taglish</string>
+    <string name="lang_english">English</string>
+    <string name="lang_auto">Auto-detect</string>
     <string name="start">Start</string>
     <string name="run_alignment">Run alignment</string>
     <string name="open_editor">Open editor</string>

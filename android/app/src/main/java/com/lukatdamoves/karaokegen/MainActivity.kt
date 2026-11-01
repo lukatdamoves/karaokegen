@@ -180,6 +180,11 @@ class MainActivity : AppCompatActivity() {
         // Empty lyrics means "transcribe" automatically.
         val transcribe = lyrics.isBlank()
         val genre = if (binding.genreBallad.isChecked) "ballad" else "hiphop"
+        // Song language from the selector (same three choices as the
+        // desktop editor). Resolved to a concrete code before sending:
+        // the backend accepts "" (auto) but its aligner requires a real
+        // code and dies on "". Auto-detect reads the lyrics text.
+        val language = resolveLanguage(binding, lyrics)
         val baseUrl = SettingsStore.getBaseUrl(this)
         val apiKey = SettingsStore.getApiKey(this)
 
@@ -289,12 +294,7 @@ class MainActivity : AppCompatActivity() {
                 val submitted = withContext(Dispatchers.IO) {
                     client.submitDraft(
                         sendFile,
-                        language = "tl", // Tagalog/Taglish (desktop default).
-                        // "" (auto) is NOT sent: the backend accepts it but
-                        // passes it straight to stable-ts, which requires a
-                        // concrete code and dies with "expected argument for
-                        // language". The backend auto-detects if "tl" is
-                        // wrong for the song, so this is safe.
+                        language = language,
                         lyrics = if (transcribe) "" else lyrics,
                         genre = genre,
                         transcribeOnly = transcribe
@@ -490,5 +490,45 @@ class MainActivity : AppCompatActivity() {
             bytes >= 1024 -> "%d KB".format(bytes / 1024)
             else -> "$bytes B"
         }
+    }
+
+    /**
+     * Resolve the language selector to the concrete code sent to /draft.
+     * Tagalog/Taglish -> "tl", English -> "en". Auto-detect reads the
+     * lyrics text: if Tagalog marker words make up at least 1% of the
+     * words it's Tagalog ("tl"), otherwise English ("en"). With no
+     * lyrics (transcribe flow) it defaults to "tl" — the desktop
+     * default, and safe because the backend auto-detects English from
+     * the lyrics once it has them. A blank "" is NEVER sent: the
+     * backend accepts it but its aligner (stable-ts) requires a
+     * concrete code and dies with "expected argument for language".
+     * The marker list and 1% threshold are ported from the backend's
+     * KaraokeGen/word_ctc.py (TAG_MARKERS / word_ctc_en_tag_ratio).
+     */
+    private fun resolveLanguage(
+        binding: ActivityMainBinding,
+        lyrics: String
+    ): String {
+        if (binding.langEnglish.isChecked) return "en"
+        if (!binding.langAuto.isChecked) return "tl" // Tagalog selected.
+        // Auto-detect from the lyrics text.
+        val words = lyrics.lowercase()
+            .split(Regex("[^a-zñ]+"))
+            .filter { it.isNotEmpty() }
+        if (words.isEmpty()) return "tl"
+        val markers = TAG_MARKERS
+        val hits = words.count { it in markers }
+        return if (hits.toDouble() / words.size >= 0.01) "tl" else "en"
+    }
+
+    companion object {
+        // Tagalog marker words (backend KaraokeGen/word_ctc.py TAG_MARKERS).
+        private val TAG_MARKERS = setOf(
+            "ang", "ng", "sa", "na", "ako", "ikaw", "ay", "mga", "hindi",
+            "kita", "para", "kaya", "bakit", "kung", "nang", "iyong",
+            "akin", "mahal", "puso", "araw", "gabi", "buwan", "ilaw",
+            "tayo", "ito", "iyon", "lang", "naman", "kami", "sila",
+            "siya", "mo", "ko"
+        )
     }
 }

@@ -262,11 +262,38 @@ class MainActivity : AppCompatActivity() {
                 currentJobId = submitted.jobId
                 AppLog.d("Main", "Draft submitted: job=${submitted.jobId} draft=${submitted.draftJobId}")
                 binding.draftStatus.text = "Queued — waiting for the GPU…"
+                // Poll for the result. A single failed poll (a DNS blip,
+                // a dropped signal) must NOT kill the flow — the job is
+                // already running on the backend. Only give up after 10
+                // failed polls in a row (~30s with no connection at all).
+                var failedPolls = 0
                 while (true) {
                     delay(3000)
-                    val job = withContext(Dispatchers.IO) { client.getJob(submitted.jobId) }
-                    val progress = withContext(Dispatchers.IO) {
-                        client.getProgress(submitted.draftJobId)
+                    val job = try {
+                        withContext(Dispatchers.IO) { client.getJob(submitted.jobId) }
+                    } catch (e: IOException) {
+                        failedPolls++
+                        AppLog.d("Main", "Poll failed ($failedPolls/10): ${e.message}")
+                        binding.draftStatus.text =
+                            "Connection hiccup — retrying… ($failedPolls/10)"
+                        if (failedPolls >= 10) {
+                            AppLog.e("Main", "Poll gave up after 10 failures")
+                            showError(
+                                "Lost connection while waiting. The draft is " +
+                                "still running on the backend — try again " +
+                                "and it will pick up.")
+                            binding.draftStatus.text = ""
+                            break
+                        }
+                        continue
+                    }
+                    failedPolls = 0
+                    val progress = try {
+                        withContext(Dispatchers.IO) {
+                            client.getProgress(submitted.draftJobId)
+                        }
+                    } catch (_: IOException) {
+                        null // Progress is nice-to-have; the job status decides.
                     }
                     if (progress != null) {
                         binding.draftStatus.text = buildString {

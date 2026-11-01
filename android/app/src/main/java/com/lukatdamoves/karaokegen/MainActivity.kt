@@ -377,13 +377,19 @@ class MainActivity : AppCompatActivity() {
         songTitle: String
     ) {
         if (result == null) {
+            AppLog.e("Main", "Draft done but the backend sent no result")
             showError("The backend finished but sent no result. Try again.")
             binding.draftStatus.text = ""
             return
         }
         if (transcribe) {
-            val transcript = result.optString("lyrics")
+            // The backend's transcribe-only result carries the text under
+            // "transcript" (not "lyrics" — that key only exists on a full
+            // DraftResult). Read "transcript" first, "lyrics" as fallback.
+            val transcript = result.optString("transcript")
+                .ifBlank { result.optString("lyrics") }
             if (transcript.isBlank()) {
+                AppLog.e("Main", "Transcribe done but no transcript text in result: ${result.keys().asSequence().toList()}")
                 showError("Transcription came back empty — try again or paste lyrics manually.")
                 binding.draftStatus.text = ""
                 return

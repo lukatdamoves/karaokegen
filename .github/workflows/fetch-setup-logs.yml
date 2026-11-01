@@ -1,0 +1,24 @@
+name: Fetch setup helper logs
+
+# Manual trigger only. Dumps recent container logs for the deployed
+# KaraokeGen setup helper (server/setup_app.py) so a failed deploy
+# can be diagnosed from outside the sandbox (which cannot reach
+# Modal's API directly).
+on:
+  workflow_dispatch:
+
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install Modal CLI
+        run: pip install "modal==1.6.2"
+      - name: Fetch setup helper logs
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          modal app logs karaokegen-setup --tail 300

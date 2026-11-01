@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit
 class ModalError(message: String) : Exception(message)
 
 data class DraftSubmitted(val jobId: String, val draftJobId: String)
-data class JobResult(val status: String, val result: JSONObject?)
+data class JobResult(val status: String, val result: JSONObject?, val error: String = "")
 data class ProgressInfo(val stage: String, val pct: Int, val detail: String)
 
 /**
@@ -101,7 +101,11 @@ class ModalClient(baseUrl: String, private val apiKey: String) {
                 throw ModalError("Backend said HTTP ${resp.code}: ${text.take(300)}")
             }
             val json = JSONObject(text)
-            return JobResult(json.optString("status"), json.optJSONObject("result"))
+            return JobResult(
+                json.optString("status"),
+                json.optJSONObject("result"),
+                json.optString("error")
+            )
         }
     }
 

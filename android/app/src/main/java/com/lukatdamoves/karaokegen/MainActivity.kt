@@ -33,6 +33,12 @@ class MainActivity : AppCompatActivity() {
     private var flowJob: Job? = null
     private var currentJobId: String? = null
     private var pendingUpdate: UpdateManager.UpdateInfo? = null
+    // Last downloaded audio, so "Run alignment" (the follow-up /draft
+    // after a transcript) reuses the file already on disk instead of
+    // downloading the same song again. Same URL + file still present.
+    private var cachedAudioUrl: String? = null
+    private var cachedResolved: YoutubeAudio.ResolvedAudio? = null
+    private var cachedSendFile: File? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -189,51 +195,73 @@ class MainActivity : AppCompatActivity() {
 
         flowJob = lifecycleScope.launch {
             try {
-                // Step 1: resolve + download the audio.
-                val resolved = YoutubeAudio.resolve(url)
-                AppLog.d("Main", "Resolved: ${resolved.title} (${resolved.durationSec}s, ${resolved.bitrate / 1000} kbps, .${resolved.suffix})")
-                binding.audioStatus.text = "Downloading: ${resolved.title}"
-                binding.audioProgress.isIndeterminate = false
-                val safeName = resolved.title
-                    .replace(Regex("[^A-Za-z0-9._-]+"), "_")
-                    .take(80)
-                    .ifEmpty { "song" }
-                val audioFile = File(
-                    getExternalFilesDir(Environment.DIRECTORY_MUSIC),
-                    "KaraokeGen/$safeName.${resolved.suffix}"
-                )
-                YoutubeAudio.download(resolved.audioUrl, audioFile) { done, total ->
-                    runOnUiThread {
-                        if (total > 0) {
-                            val pct = (done * 100 / total).toInt()
-                            binding.audioProgress.progress = pct
-                            binding.audioStatus.text =
-                                "Downloading: ${resolved.title} — $pct%"
+                // Step 1: resolve + download the audio — unless this is
+                // the follow-up "Run alignment" for the same link, in
+                // which case the audio is already on disk (and the
+                // backend has the stems cached), so reuse it.
+                val reuseFile = if (cachedAudioUrl == url) {
+                    cachedSendFile?.takeIf { it.exists() }
+                } else null
+                val reuseResolved = if (reuseFile != null) cachedResolved else null
+                val resolved: YoutubeAudio.ResolvedAudio
+                var sendFile: File
+                if (reuseFile != null && reuseResolved != null) {
+                    resolved = reuseResolved
+                    sendFile = reuseFile
+                    AppLog.d("Main", "Reusing downloaded audio: ${sendFile.length()} bytes -> ${sendFile.name}")
+                    binding.audioStatus.text = "Using downloaded audio: ${resolved.title}"
+                    binding.audioProgress.visibility = View.GONE
+                } else {
+                    val r = YoutubeAudio.resolve(url)
+                    AppLog.d("Main", "Resolved: ${r.title} (${r.durationSec}s, ${r.bitrate / 1000} kbps, .${r.suffix})")
+                    binding.audioStatus.text = "Downloading: ${r.title}"
+                    binding.audioProgress.isIndeterminate = false
+                    val safeName = r.title
+                        .replace(Regex("[^A-Za-z0-9._-]+"), "_")
+                        .take(80)
+                        .ifEmpty { "song" }
+                    val audioFile = File(
+                        getExternalFilesDir(Environment.DIRECTORY_MUSIC),
+                        "KaraokeGen/$safeName.${r.suffix}"
+                    )
+                    YoutubeAudio.download(r.audioUrl, audioFile) { done, total ->
+                        runOnUiThread {
+                            if (total > 0) {
+                                val pct = (done * 100 / total).toInt()
+                                binding.audioProgress.progress = pct
+                                binding.audioStatus.text =
+                                    "Downloading: ${r.title} — $pct%"
+                            }
                         }
                     }
-                }
-                AppLog.d("Main", "Audio ready: ${audioFile.length()} bytes -> ${audioFile.name}")
-                // YouTube serves WebM/Opus or M4A/AAC, never MP3 — convert
-                // to MP3 on-device so the trial only ever sends .mp3. If
-                // this phone has no MP3 encoder, keep the original file
-                // (the backend decodes any format, so the draft still works).
-                var sendFile = audioFile
-                if (audioFile.extension.lowercase() != "mp3") {
-                    binding.audioStatus.text = "Converting to MP3…"
-                    val mp3File = File(
-                        audioFile.parentFile,
-                        "${audioFile.nameWithoutExtension}.mp3"
-                    )
-                    val converted = withContext(Dispatchers.IO) {
-                        AudioConvert.toMp3(audioFile, mp3File)
+                    AppLog.d("Main", "Audio ready: ${audioFile.length()} bytes -> ${audioFile.name}")
+                    // YouTube serves WebM/Opus or M4A/AAC, never MP3 — convert
+                    // to MP3 on-device so the trial only ever sends .mp3. If
+                    // this phone has no MP3 encoder, keep the original file
+                    // (the backend decodes any format, so the draft still works).
+                    sendFile = audioFile
+                    if (audioFile.extension.lowercase() != "mp3") {
+                        binding.audioStatus.text = "Converting to MP3…"
+                        val mp3File = File(
+                            audioFile.parentFile,
+                            "${audioFile.nameWithoutExtension}.mp3"
+                        )
+                        val converted = withContext(Dispatchers.IO) {
+                            AudioConvert.toMp3(audioFile, mp3File)
+                        }
+                        if (converted) {
+                            AppLog.d("Main", "Converted to MP3: ${mp3File.length()} bytes -> ${mp3File.name}")
+                            try { audioFile.delete() } catch (_: Exception) {}
+                            sendFile = mp3File
+                        } else {
+                            AppLog.d("Main", "MP3 convert unavailable — sending original .${audioFile.extension}")
+                        }
                     }
-                    if (converted) {
-                        AppLog.d("Main", "Converted to MP3: ${mp3File.length()} bytes -> ${mp3File.name}")
-                        try { audioFile.delete() } catch (_: Exception) {}
-                        sendFile = mp3File
-                    } else {
-                        AppLog.d("Main", "MP3 convert unavailable — sending original .${audioFile.extension}")
-                    }
+                    resolved = r
+                    // Cache for a follow-up "Run alignment" on this link.
+                    cachedAudioUrl = url
+                    cachedResolved = r
+                    cachedSendFile = sendFile
                 }
                 binding.audioProgress.visibility = View.GONE
                 val info = buildString {
@@ -326,8 +354,9 @@ class MainActivity : AppCompatActivity() {
                             break
                         }
                         "error" -> {
-                            AppLog.e("Main", "Draft error from backend")
-                            showError("The draft failed on the backend. Try again.")
+                            val detail = job.error.ifBlank { "no detail from backend" }
+                            AppLog.e("Main", "Draft error from backend: $detail")
+                            showError("The draft failed on the backend: $detail")
                             binding.draftStatus.text = ""
                             break
                         }

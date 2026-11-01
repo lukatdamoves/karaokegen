@@ -6,7 +6,6 @@ import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
-import java.net.URLDecoder
 
 /**
  * Tiny in-app localhost server that serves the desktop editor
@@ -90,9 +89,9 @@ object LocalApiServer : NanoHTTPD("127.0.0.1", 0) {
                     serveAsset("favicon.ico")
                 method == Method.GET && uri == "/api/config" -> serveConfig()
                 method == Method.GET && uri == "/api/modal/status" -> serveModalStatus()
-                method == Method.POST && uri == "/api/modal/token" -> jsonError(400, DEPLOY_UNAVAILABLE)
-                method == Method.POST && uri == "/api/modal/deploy" -> jsonError(400, DEPLOY_UNAVAILABLE)
-                method == Method.GET && uri == "/api/modal/deploy/log" -> jsonError(400, DEPLOY_UNAVAILABLE)
+                method == Method.POST && uri == "/api/modal/token" -> textError(400, DEPLOY_UNAVAILABLE)
+                method == Method.POST && uri == "/api/modal/deploy" -> textError(400, DEPLOY_UNAVAILABLE)
+                method == Method.GET && uri == "/api/modal/deploy/log" -> textError(400, DEPLOY_UNAVAILABLE)
                 method == Method.POST && uri == "/api/modal/disconnect" -> serveDisconnect()
                 method == Method.POST && uri == "/api/draft" -> serveDraft(session, transcribeOnly = false)
                 method == Method.POST && uri == "/api/transcribe" -> serveDraft(session, transcribeOnly = true)
@@ -144,9 +143,12 @@ object LocalApiServer : NanoHTTPD("127.0.0.1", 0) {
     private fun serveEditor(session: IHTTPSession): Response {
         val html = readAssetText("editor.html")
         val params = session.parameters
-        val draftId = params["draft"]?.firstOrNull()?.let { URLDecoder.decode(it, "UTF-8") }.orEmpty()
-        val callId = params["call"]?.firstOrNull()?.let { URLDecoder.decode(it, "UTF-8") }.orEmpty()
-        val fileName = params["name"]?.firstOrNull()?.let { URLDecoder.decode(it, "UTF-8") }.orEmpty()
+        // NanoHTTPD already percent-decodes session.parameters — do NOT
+        // URLDecoder.decode again (it would turn a "+" in a song title
+        // into a space, and double-decode % sequences).
+        val draftId = params["draft"]?.firstOrNull().orEmpty()
+        val callId = params["call"]?.firstOrNull().orEmpty()
+        val fileName = params["name"]?.firstOrNull().orEmpty()
         val configured = isConfigured()
         var out = html
             .replace("{{ build_stamp }}", "android-" + BuildConfig.VERSION_NAME)
@@ -161,13 +163,27 @@ object LocalApiServer : NanoHTTPD("127.0.0.1", 0) {
         // editor's own resume logic (checkResumable) picks up a draft
         // the native flow already finished.
         val seed = StringBuilder()
+        if (draftId.isNotEmpty()) {
+            // A NEW draft must not inherit the previous song's edits.
+            // editor.js keeps the edited alignment in localStorage under
+            // 'kg_alignment_edited' (no job id attached) and checkResumable
+            // restores it before loading the new draft. If the stored
+            // draft id differs from this one, drop the stale edits and
+            // the stale draft result first, so the new draft loads.
+            // Same draft id (a refresh/resume) keeps its edits.
+            seed.append("(function(){var _nd=")
+                .append(JSONObject.quote(draftId))
+                .append(",_od=localStorage.getItem('kg_draft_job_id');")
+                .append("if(_nd&&_od&&_od!==_nd){")
+                .append("localStorage.removeItem('kg_alignment_edited');")
+                .append("localStorage.removeItem('kg_draft_result');")
+                .append("}})();")
+            seed.append("localStorage.setItem('kg_draft_job_id',")
+                .append(JSONObject.quote(draftId)).append(");")
+        }
         if (callId.isNotEmpty()) {
             seed.append("localStorage.setItem('kg_call_id',")
                 .append(JSONObject.quote(callId)).append(");")
-        }
-        if (draftId.isNotEmpty()) {
-            seed.append("localStorage.setItem('kg_draft_job_id',")
-                .append(JSONObject.quote(draftId)).append(");")
         }
         if (fileName.isNotEmpty()) {
             seed.append("localStorage.setItem('kg_file_name',")
@@ -354,6 +370,13 @@ object LocalApiServer : NanoHTTPD("127.0.0.1", 0) {
         } catch (e: Exception) {
             return jsonError(400, "invalid JSON body")
         }
+        // RenderRequest caps output_name at 64 chars; a long YouTube
+        // title would make Modal reject the render with 422. Truncate
+        // it here (the editor must stay unmodified).
+        val outName = body.optString("output_name")
+        if (outName.length > 64) {
+            body.put("output_name", outName.take(64))
+        }
         val result = modalClient().submitRender(body, wordLevel)
         AppLog.d(TAG, "render submitted (word=$wordLevel): ${result.optString("job_id")}")
         return jsonResponse(result)
@@ -395,6 +418,13 @@ object LocalApiServer : NanoHTTPD("127.0.0.1", 0) {
         val json = JSONObject().put("detail", detail)
         val code = Response.Status.lookup(status) ?: Response.Status.INTERNAL_ERROR
         return newFixedLengthResponse(code, "application/json", json.toString())
+    }
+
+    /** Plain-text error (the editor shows r.text() verbatim for the
+     *  deploy stubs, so a JSON body would display as raw JSON). */
+    private fun textError(status: Int, message: String): Response {
+        val code = Response.Status.lookup(status) ?: Response.Status.INTERNAL_ERROR
+        return newFixedLengthResponse(code, "text/plain", message)
     }
 
     private fun deleteQuietly(path: String) {

@@ -1,0 +1,45 @@
+# Manually reset the setup helper's rate limits.
+#
+# Why: the helper limits /setup/start to 3/hour per IP. If James (or a
+# tester) hits that during setup attempts, they are locked out for an
+# hour. This workflow clears the rate-limit Dict so setup works again
+# right away. It does NOT touch the jobs Dict (running/finished
+# deploys are unaffected).
+#
+# Run it from Actions -> Reset setup rate limits -> Run workflow.
+# Needs the same MODAL_TOKEN_ID / MODAL_TOKEN_SECRET repo secrets as
+# the deploy workflow (they authenticate to the Modal account that
+# owns the helper + its Dicts).
+
+name: Reset setup rate limits
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - name: Install Modal CLI
+        run: pip install modal==1.6.2
+      - name: Clear the rate-limit Dict
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          python - <<'PY'
+          import modal
+          d = modal.Dict.from_name(
+              "karaokegen-setup-ratelimit", create_if_missing=False)
+          keys = list(d.keys())
+          print(f"rate-limit entries: {len(keys)}")
+          for k in keys:
+              print("  clearing:", k)
+              del d[k]
+          print("rate limits reset.")
+          PY

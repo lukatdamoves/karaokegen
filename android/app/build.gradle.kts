@@ -115,7 +115,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // Tiny localhost HTTP server for the editor (serves editor.html and
     // proxies /api/* to the Modal backend). Much lighter than Ktor.
-    implementation("org.nanohttpd:nanohttpd:2.3.2")
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
     // YouTube audio extraction (JitPack — not on Maven Central).
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
 }

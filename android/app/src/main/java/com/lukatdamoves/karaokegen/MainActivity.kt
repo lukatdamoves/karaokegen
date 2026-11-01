@@ -50,51 +50,8 @@ class MainActivity : AppCompatActivity() {
             binding.updateCard.visibility = View.GONE
             pendingUpdate = null
         }
-        binding.backendCard.setOnClickListener {
-            startActivity(Intent(this, SettingsActivity::class.java))
-        }
 
-        refreshBackendCard()
         checkForUpdateSilently()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        // The backend may have been set up (or changed) in Settings —
-        // refresh the card every time this screen comes back.
-        refreshBackendCard()
-    }
-
-    /** Big obvious backend card at the top: green when ready, amber
-     *  when the saved address is the old misspelling and needs a
-     *  reconnect in Settings. Tapping the card opens Settings. */
-    private fun refreshBackendCard() {
-        val saved = SettingsStore.getBaseUrl(this)
-        when {
-            saved.isEmpty() -> {
-                binding.backendCard.setCardBackgroundColor(
-                    getColor(R.color.kg_panel))
-                binding.backendCardTitle.text =
-                    getString(R.string.backend_none_title)
-                binding.backendCardText.text =
-                    getString(R.string.backend_none_text)
-            }
-            SettingsStore.isStaleBackendUrl(saved) -> {
-                binding.backendCard.setCardBackgroundColor(
-                    getColor(R.color.kg_warn_bg))
-                binding.backendCardTitle.text =
-                    getString(R.string.backend_stale_title)
-                binding.backendCardText.text =
-                    getString(R.string.backend_stale_text)
-            }
-            else -> {
-                binding.backendCard.setCardBackgroundColor(
-                    getColor(R.color.kg_ready_bg))
-                binding.backendCardTitle.text =
-                    getString(R.string.backend_ready_title)
-                binding.backendCardText.text = saved
-            }
-        }
     }
 
     override fun onDestroy() {
@@ -248,13 +205,35 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 AppLog.d("Main", "Audio ready: ${audioFile.length()} bytes -> ${audioFile.name}")
+                // YouTube serves WebM/Opus or M4A/AAC, never MP3 — convert
+                // to MP3 on-device so the trial only ever sends .mp3. If
+                // this phone has no MP3 encoder, keep the original file
+                // (the backend decodes any format, so the draft still works).
+                var sendFile = audioFile
+                if (audioFile.extension.lowercase() != "mp3") {
+                    binding.audioStatus.text = "Converting to MP3…"
+                    val mp3File = File(
+                        audioFile.parentFile,
+                        "${audioFile.nameWithoutExtension}.mp3"
+                    )
+                    val converted = withContext(Dispatchers.IO) {
+                        AudioConvert.toMp3(audioFile, mp3File)
+                    }
+                    if (converted) {
+                        AppLog.d("Main", "Converted to MP3: ${mp3File.length()} bytes -> ${mp3File.name}")
+                        try { audioFile.delete() } catch (_: Exception) {}
+                        sendFile = mp3File
+                    } else {
+                        AppLog.d("Main", "MP3 convert unavailable — sending original .${audioFile.extension}")
+                    }
+                }
                 binding.audioProgress.visibility = View.GONE
                 val info = buildString {
                     append(resolved.title)
                     append("\n")
                     append(formatDuration(resolved.durationSec))
                     append(" • ")
-                    append(formatSize(audioFile.length()))
+                    append(formatSize(sendFile.length()))
                     append(" • ")
                     append(resolved.bitrate / 1000)
                     append(" kbps")
@@ -273,7 +252,7 @@ class MainActivity : AppCompatActivity() {
                 val client = ModalClient(baseUrl, apiKey)
                 val submitted = withContext(Dispatchers.IO) {
                     client.submitDraft(
-                        audioFile,
+                        sendFile,
                         language = "", // auto-detect
                         lyrics = if (transcribe) "" else lyrics,
                         genre = genre,

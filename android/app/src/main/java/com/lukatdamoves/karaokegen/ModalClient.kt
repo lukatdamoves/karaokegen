@@ -4,12 +4,9 @@ import android.util.Base64
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
-import okio.BufferedSink
 import org.json.JSONObject
 import java.io.File
-import java.io.FileInputStream
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -41,9 +38,11 @@ class ModalClient(baseUrl: String, private val apiKey: String) {
         Request.Builder().url(url).addHeader("Authorization", "Bearer $apiKey")
 
     /**
-     * Submit a draft (or transcribe-only) job. The audio is streamed to the
-     * request as base64 in small chunks — no giant base64 string in memory,
-     * which matters on low-RAM phones.
+     * Submit a draft (or transcribe-only) job. The audio is base64'd
+     * into one JSON body (like the desktop app). A 3 MB song becomes
+     * ~4 MB of base64 — fine in memory, and far less error-prone than
+     * streaming the JSON in chunks (a chunked build once produced a
+     * malformed body the backend rejected with 422).
      */
     @Throws(IOException::class, ModalError::class)
     fun submitDraft(
@@ -54,7 +53,17 @@ class ModalClient(baseUrl: String, private val apiKey: String) {
         transcribeOnly: Boolean
     ): DraftSubmitted {
         val endpoint = if (transcribeOnly) "/transcribe" else "/draft"
-        val body = streamingDraftBody(audioFile, language, lyrics, genre)
+        val audioB64 = Base64.encodeToString(
+            audioFile.readBytes(), Base64.NO_WRAP)
+        val bodyJson = JSONObject().apply {
+            put("audio_b64", audioB64)
+            put("language", language)
+            put("lyrics", lyrics)
+            put("genre", genre)
+            put("backing_vocals", false)
+            put("start_s", 0)
+        }
+        val body = bodyJson.toString().toRequestBody(jsonType)
         val req = authed(base + endpoint).post(body).build()
         client.newCall(req).execute().use { resp ->
             val text = resp.body?.string() ?: ""
@@ -113,51 +122,4 @@ class ModalClient(baseUrl: String, private val apiKey: String) {
         }
     }
 
-    /**
-     * JSON body for DraftRequest, with the audio base64-encoded in 24 KiB
-     * chunks (a multiple of 3 bytes, so chunk boundaries never split a
-     * base64 group). Same shape the desktop app sends: audio_b64, language,
-     * lyrics, genre, backing_vocals=false, start_s=0.
-     */
-    private fun streamingDraftBody(
-        audioFile: File,
-        language: String,
-        lyrics: String,
-        genre: String
-    ): RequestBody {
-        val prefix = """{"audio_b64":""".toByteArray(Charsets.UTF_8)
-        val suffix = (
-            ""","language":""" + JSONObject.quote(language) +
-                ""","lyrics":""" + JSONObject.quote(lyrics) +
-                ""","genre":""" + JSONObject.quote(genre) +
-                ""","backing_vocals":false,"start_s":0}"""
-            ).toByteArray(Charsets.UTF_8)
-        val b64Len = 4L * ((audioFile.length() + 2) / 3)
-        val totalLen = prefix.size + b64Len + suffix.size
-        return object : RequestBody() {
-            override fun contentType() = jsonType
-            override fun contentLength() = totalLen
-
-            override fun writeTo(sink: BufferedSink) {
-                sink.write(prefix)
-                val buf = ByteArray(3 * 8192)
-                FileInputStream(audioFile).use { input ->
-                    while (true) {
-                        var read = 0
-                        while (read < buf.size) {
-                            val n = input.read(buf, read, buf.size - read)
-                            if (n == -1) break
-                            read += n
-                        }
-                        if (read == 0) break
-                        val chunk = if (read == buf.size) buf else buf.copyOf(read)
-                        val encoded = Base64.encodeToString(chunk, Base64.NO_WRAP)
-                        sink.write(encoded.toByteArray(Charsets.US_ASCII))
-                        if (read < buf.size) break
-                    }
-                }
-                sink.write(suffix)
-            }
-        }
-    }
 }

@@ -30,40 +30,6 @@ class SettingsActivity : AppCompatActivity() {
 
         binding.setupButton.setOnClickListener { onSetupTapped() }
 
-        // Show the saved backend as one line, so it can be copied/edited.
-        val savedUrl = SettingsStore.getBaseUrl(this)
-        val savedKey = SettingsStore.getApiKey(this)
-        binding.backendLineInput.setText(
-            when {
-                savedUrl.isEmpty() -> ""
-                savedKey.isEmpty() -> savedUrl
-                else -> "$savedUrl $savedKey"
-            }
-        )
-
-        binding.saveButton.setOnClickListener {
-            val line = binding.backendLineInput.text?.toString()?.trim().orEmpty()
-            val parsed = parseBackendLine(line)
-            if (parsed == null) {
-                Toast.makeText(this, R.string.backend_line_bad, Toast.LENGTH_LONG).show()
-                return@setOnClickListener
-            }
-            val (url, key) = parsed
-            if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                Toast.makeText(this, R.string.backend_url_bad, Toast.LENGTH_LONG).show()
-                return@setOnClickListener
-            }
-            // A pasted URL on its own keeps the key already saved.
-            val finalKey = key.ifEmpty { SettingsStore.getApiKey(this) }
-            if (finalKey.isEmpty()) {
-                Toast.makeText(this, R.string.backend_key_missing, Toast.LENGTH_LONG).show()
-                return@setOnClickListener
-            }
-            SettingsStore.save(this, url, finalKey)
-            AppLog.d("Settings", "Backend saved: $url (key ${finalKey.length} chars)")
-            binding.savedText.visibility = View.VISIBLE
-        }
-
         binding.checkUpdatesButton.setOnClickListener {
             binding.updateCheckResult.text = getString(R.string.checking_updates)
             lifecycleScope.launch {
@@ -112,12 +78,11 @@ class SettingsActivity : AppCompatActivity() {
                         }
                     }
                 }
-                // Save the new backend and show it in the one-line field.
+                // Save the new backend. The URL + key live in SettingsStore;
+                // there is no paste field anymore — setup is the only way in.
                 SettingsStore.save(this@SettingsActivity, result.url, result.apiKey)
-                binding.backendLineInput.setText("${result.url} ${result.apiKey}")
                 binding.setupStatus.text = getString(R.string.setup_done)
                 binding.setupProgress.visibility = View.GONE
-                binding.savedText.visibility = View.VISIBLE
                 AppLog.d("Settings", "Auto-setup done: ${result.url}")
                 Toast.makeText(this@SettingsActivity, R.string.setup_done, Toast.LENGTH_LONG).show()
             } catch (e: SetupError) {
@@ -141,21 +106,6 @@ class SettingsActivity : AppCompatActivity() {
     override fun onDestroy() {
         setupJob?.cancel()
         super.onDestroy()
-    }
-
-    private fun parseBackendLine(line: String): Pair<String, String>? {
-        if (line.isEmpty()) return null
-        if ("|" in line) {
-            val parts = line.split("|", limit = 2)
-            val url = parts[0].trim()
-            val key = parts.getOrNull(1)?.trim().orEmpty()
-            return if (url.isEmpty()) null else url to key
-        }
-        val parts = line.split(Regex("\\s+")).filter { it.isNotEmpty() }
-        if (parts.isEmpty()) return null
-        val url = parts[0]
-        val key = if (parts.size > 1) parts[1] else ""
-        return url to key
     }
 
     override fun onSupportNavigateUp(): Boolean {

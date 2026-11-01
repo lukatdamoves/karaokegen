@@ -1,0 +1,58 @@
+# Stop ALL karaokegen backend apps (there are stale duplicates from
+# racing deploys — each `modal deploy` that raced created its own app
+# object, and the web-function label ended up attached to a broken
+# one, so /draft answers "modal-http: invalid function call").
+# After this, run setup once from the app for a single clean deploy.
+# Run from Actions -> Stop karaokegen backends -> Run workflow.
+# Uses the same MODAL_TOKEN_ID / MODAL_TOKEN_SECRET repo secrets as
+# the deploy workflow. Does NOT touch karaokegen-setup (the helper)
+# or revance-karaoke.
+
+name: Stop karaokegen backends
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - name: Install Modal CLI
+        run: pip install modal==1.6.2
+      - name: Stop every karaokegen app
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          python - <<'PY'
+          import subprocess, json
+          # List apps (JSON) and stop every karaokengen one.
+          out = subprocess.run(
+              ["modal", "app", "list", "--json"],
+              capture_output=True, text=True)
+          try:
+              apps = json.loads(out.stdout)
+          except Exception:
+              print("could not parse app list")
+              print("stdout:", out.stdout[:2000])
+              print("stderr:", out.stderr[:2000])
+              raise SystemExit(1)
+          stopped = 0
+          for app in apps:
+              name = app.get("name") or app.get("description") or ""
+              app_id = app.get("id") or app.get("app_id") or ""
+              state = app.get("state") or ""
+              if "karaokengen" in str(name).lower() and app_id:
+                  print(f"stopping {app_id} ({name}, {state})")
+                  r = subprocess.run(
+                      ["modal", "app", "stop", app_id],
+                      capture_output=True, text=True)
+                  print("  ->", (r.stdout or r.stderr or "").strip()[:300])
+                  stopped += 1
+          print(f"stopped {stopped} karaokengen app(s)")
+          PY

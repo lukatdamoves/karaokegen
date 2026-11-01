@@ -44,6 +44,11 @@ class MainActivity : AppCompatActivity() {
         binding.settingsButton.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
+        binding.openEditorButton.setOnClickListener {
+            // Resume a previous job in the editor (it restores from its
+            // own saved state), or start fresh from the editor's draft form.
+            startActivity(EditorActivity.newIntent(this))
+        }
         binding.copyLogsButton.setOnClickListener { onCopyLogs() }
         binding.updateButton.setOnClickListener { onUpdateTapped() }
         binding.updateLaterButton.setOnClickListener {
@@ -161,6 +166,9 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, SettingsActivity::class.java))
             return
         }
+        // A fresh run is always "Start" — the "Run alignment" label only
+        // applies right after a transcribe, and showDraftDone sets it.
+        binding.startButton.text = getString(R.string.start)
         clearError()
         val lyrics = binding.lyricsInput.text?.toString().orEmpty()
         // Empty lyrics means "transcribe" automatically.
@@ -310,7 +318,11 @@ class MainActivity : AppCompatActivity() {
                     when (job.status) {
                         "done" -> {
                             AppLog.d("Main", "Draft done")
-                            showDraftDone(job.result, transcribe)
+                            showDraftDone(
+                                job.result, transcribe,
+                                submitted.draftJobId, submitted.jobId,
+                                resolved.title
+                            )
                             break
                         }
                         "error" -> {
@@ -348,10 +360,40 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showDraftDone(result: JSONObject?, transcribe: Boolean) {
+    /**
+     * Draft finished.
+     * - With lyrics: the alignment is ready — open the editor (Step 2)
+     *   with this draft, where the user drags word timings and renders.
+     * - Transcribe-only: no alignment yet. Put the transcript into the
+     *   lyrics box for editing; the user fixes the text and taps Start
+     *   (now "Run alignment") to align it. The follow-up /draft reuses
+     *   the cached stems server-side, so separation is skipped.
+     */
+    private fun showDraftDone(
+        result: JSONObject?,
+        transcribe: Boolean,
+        draftJobId: String,
+        callId: String,
+        songTitle: String
+    ) {
         if (result == null) {
             showError("The backend finished but sent no result. Try again.")
             binding.draftStatus.text = ""
+            return
+        }
+        if (transcribe) {
+            val transcript = result.optString("lyrics")
+            if (transcript.isBlank()) {
+                showError("Transcription came back empty — try again or paste lyrics manually.")
+                binding.draftStatus.text = ""
+                return
+            }
+            binding.lyricsInput.setText(transcript)
+            binding.draftStatus.text = ""
+            binding.draftResult.text = getString(R.string.transcript_ready_hint)
+            binding.draftResult.visibility = View.VISIBLE
+            binding.startButton.text = getString(R.string.run_alignment)
+            AppLog.d("Main", "Transcript ready (${transcript.length} chars) — waiting for edits")
             return
         }
         val alignment = result.optJSONObject("alignment")
@@ -365,25 +407,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
         val duration = result.optDouble("duration", 0.0)
-        val lyrics = result.optString("lyrics")
-        val summary = buildString {
-            append(getString(R.string.draft_ready_title))
-            append(" — ")
-            append(lines)
-            append(" lines, ")
-            append(words)
-            append(" words, ")
-            append(formatDuration(duration.toLong()))
-            append(".\n")
-            append(getString(R.string.draft_next_trial))
-            if (transcribe && lyrics.isNotEmpty()) {
-                append("\n\nTranscript:\n")
-                append(lyrics.take(500))
-            }
-        }
+        AppLog.d("Main", "Draft ready: $lines lines, $words words, ${formatDuration(duration.toLong())} — opening editor")
         binding.draftStatus.text = ""
-        binding.draftResult.text = summary
+        binding.draftResult.text = getString(R.string.draft_ready_title) +
+            " — $lines lines, $words words. Opening the editor…"
         binding.draftResult.visibility = View.VISIBLE
+        binding.startButton.text = getString(R.string.start)
+        startActivity(
+            EditorActivity.newIntent(this, draftJobId, callId, songTitle)
+        )
     }
 
     private fun onCancel() {

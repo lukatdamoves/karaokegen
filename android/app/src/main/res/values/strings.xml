@@ -2,8 +2,8 @@
 <resources>
     <string name="app_name">KaraokeGen</string>
 
-    <string name="main_title">KaraokeGen — trial</string>
-    <string name="main_subtitle">Paste a YouTube link. The app downloads the audio — no file upload needed.</string>
+    <string name="main_title">KaraokeGen</string>
+    <string name="main_subtitle">Paste a YouTube link. The app downloads the audio, drafts the karaoke timing in the cloud, then opens the editor — drag the words, then render the MP4.</string>
 
     <string name="youtube_url_label">YouTube link</string>
     <string name="youtube_url_hint">https://www.youtube.com/watch?v=…</string>
@@ -13,6 +13,9 @@
     <string name="genre_hiphop">Hiphop / R&amp;B</string>
     <string name="genre_ballad">Ballad / Pop</string>
     <string name="start">Start</string>
+    <string name="run_alignment">Run alignment</string>
+    <string name="open_editor">Open editor</string>
+    <string name="transcript_ready_hint">Transcript ready — fix the text in the lyrics box above, then tap “Run alignment”. The timing run reuses the separated audio, so it skips straight to alignment.</string>
 
     <string name="audio_ready">Audio ready.</string>
     <string name="cancel_draft">Cancel draft</string>
@@ -22,7 +25,6 @@
     <string name="logs_empty">Nothing logged yet — try a download first.</string>
 
     <string name="draft_ready_title">Draft ready</string>
-    <string name="draft_next_trial">The editor and render come in the next trial — for now this proves the YouTube download and the cloud draft work.</string>
 
     <string name="settings_title">Backend settings</string>
     <string name="settings_help">The draft runs on your Modal backend (the same one the desktop app uses). This app can’t deploy one. Paste one line: your backend URL and your API key, separated by a space — like the KaraokeNow ReVanced setup.</string>

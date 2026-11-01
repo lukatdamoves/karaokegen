@@ -12,11 +12,11 @@ import java.net.URLDecoder
  * Tiny in-app localhost server that serves the desktop editor
  * (editor.html + editor.js + wavesurfer, single-sourced from
  * local_app/ at build time — see the copyEditorAssets Gradle task)
- * and proxies its /api/* calls to the Modal backend using the saved
+ * and proxies its /api/… calls to the Modal backend using the saved
  * backend URL + API key.
  *
  * Why a localhost server instead of a JS bridge: editor.js keeps
- * calling /api/* exactly like the desktop, so it needs ZERO changes.
+ * calling /api/… exactly like the desktop, so it needs ZERO changes.
  * The only Android-specific bits live here: the two Jinja placeholders
  * in editor.html are substituted (build stamp + the config overlay
  * visibility), a small touch shim is injected (wavesurfer Regions is

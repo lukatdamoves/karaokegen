@@ -210,12 +210,16 @@ class ModalClient(baseUrl: String, private val apiKey: String) {
             resp.close()
             throw ModalError("Backend said HTTP ${resp.code}: ${text.take(300)}")
         }
-        return ResponseInputStream(resp)
+        val body = resp.body
+            ?: run { resp.close(); throw ModalError("Backend returned an empty response.") }
+        return ResponseInputStream(resp, body.byteStream())
     }
 
     /** An OkHttp response body stream that closes the response when closed. */
-    private class ResponseInputStream(private val response: Response) :
-        FilterInputStream(response.body.byteStream()) {
+    private class ResponseInputStream(
+        private val response: Response,
+        stream: InputStream
+    ) : FilterInputStream(stream) {
         override fun close() {
             try { super.close() } finally { response.close() }
         }

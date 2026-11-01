@@ -24,7 +24,7 @@ import com.lukatdamoves.karaokegen.databinding.ActivityEditorBinding
  *
  * The editor is the desktop editor (editor.html + editor.js + wavesurfer),
  * served unchanged from the in-app localhost server (LocalApiServer), so
- * editor.js keeps calling /api/* exactly like the desktop. The native
+ * editor.js keeps calling /api/… exactly like the desktop. The native
  * draft flow hands a finished draft over via ?draft= (draft_job_id),
  * ?call= (Modal call id) and ?name= (song title); the server seeds those
  * into localStorage before editor.js runs, so the editor's own resume

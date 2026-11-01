@@ -8,7 +8,9 @@ import androidx.lifecycle.lifecycleScope
 import com.lukatdamoves.karaokegen.databinding.ActivitySettingsBinding
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.IOException
 
 /**
@@ -101,9 +103,22 @@ class SettingsActivity : AppCompatActivity() {
         AppLog.d("Settings", "Auto-setup started")
         setupJob = lifecycleScope.launch {
             try {
-                val jobId = SetupClient.startSetup(tokenId, tokenSecret)
+                // The job id MUST be saved even if the user leaves
+                // this screen while startSetup is still running
+                // (cold helper = slow first call). Without this, the
+                // job id is lost, the deploy is orphaned, and coming
+                // back shows a plain settings screen with no loading
+                // — because onCreate has no saved job to resume.
+                // NonCancellable lets the start + save finish; the
+                // watching after it is still cancelled normally, and
+                // onCreate resumes it from the saved job id.
+                val jobId = withContext(NonCancellable) {
+                    val id = SetupClient.startSetup(tokenId, tokenSecret)
+                    SettingsStore.saveSetupJob(
+                        this@SettingsActivity, id)
+                    id
+                }
                 AppLog.d("Settings", "Auto-setup job: $jobId")
-                SettingsStore.saveSetupJob(this@SettingsActivity, jobId)
                 runSetupWatch(jobId)
             } catch (e: SetupError) {
                 AppLog.e("Settings", "Auto-setup failed: ${e.message}")

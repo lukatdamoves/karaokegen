@@ -81,3 +81,18 @@ jobs:
               --notes "First Android trial: paste a YouTube link, download the audio, draft via your Modal backend. Install once — updates arrive in-app (OTA)." \
               --prerelease
           fi
+
+      # Keep release storage tidy: each build adds one ~6.5MB APK, so delete
+      # all but the newest 3. The in-app updater only ever needs the latest.
+      - name: Prune old APK assets (keep newest 3)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view v0.1.0-trial --json assets -q '.assets[] | select(.name | test("\\.apk$")) | .name' \
+            | sort -t c -k2 -n | head -n -3 \
+            | while read -r OLD; do
+                echo "Deleting old APK: $OLD"
+                gh release delete-asset v0.1.0-trial "$OLD" -y
+              done
+          echo "Remaining APKs:"
+          gh release view v0.1.0-trial --json assets -q '.assets[] | select(.name | test("\\.apk$")) | .name'

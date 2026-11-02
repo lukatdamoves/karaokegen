@@ -428,11 +428,12 @@
                     android:layout_marginTop="12dp"
                     android:visibility="gone" />
 
-                <!-- Waveform with draggable word regions — pinned at the top. -->
+                <!-- Waveform with draggable word regions — pinned at the top.
+                     176dp (was 220dp): shorter so the word list gets more room. -->
                 <com.lukatdamoves.karaokegen.WaveformView
                     android:id="@+id/editorWaveform"
                     android:layout_width="match_parent"
-                    android:layout_height="220dp"
+                    android:layout_height="176dp"
                     android:layout_marginTop="12dp" />
 
                 <!-- Zoom: less time across the width. -->
@@ -496,14 +497,17 @@
                         android:textAppearance="?attr/textAppearanceBodyMedium" />
                 </LinearLayout>
 
-                <!-- Word list: tap a word to play just it,
-                     long-press it to fix its text. -->
+                <!-- Word list hint — exactly ONE line: 48 chars at 12sp
+                     fits a ~360dp phone (328dp of content, ~6dp/char).
+                     No ellipsize — the full text is visible. -->
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="16dp"
                     android:text="@string/editor_words_hint"
-                    android:textAppearance="?attr/textAppearanceBodyMedium" />
+                    android:textSize="12sp"
+                    android:maxLines="1"
+                    android:singleLine="true" />
 
                 <!-- Tappable words — scrollable, takes the remaining
                      space so the waveform stays pinned at the top. -->

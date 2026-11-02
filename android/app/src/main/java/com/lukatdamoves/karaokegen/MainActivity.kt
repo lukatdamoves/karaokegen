@@ -28,6 +28,7 @@ import androidx.lifecycle.lifecycleScope
 import com.lukatdamoves.karaokegen.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -96,6 +97,12 @@ class MainActivity : AppCompatActivity() {
     // Render background colour (the swatches below the word list).
     // Black by default, matching the desktop.
     private var editorBgColor: String = "#000000"
+    // Guards against a slow load overwriting a newer one: each
+    // loadNativeEditor bumps this, and a load that finds the number
+    // changed after an await stops instead of clobbering the editor
+    // (e.g. the user taps job A, then job B before A's download
+    // finishes).
+    private var editorLoadSeq = 0
     // Word chip views (WordRef -> chip), so the ticker can highlight
     // the currently playing word without rebuilding the list.
     private var editorChipViews: MutableMap<WordRef, TextView> = mutableMapOf()
@@ -264,14 +271,20 @@ class MainActivity : AppCompatActivity() {
      *  — this is the same page, not a new one. Re-opening the same
      *  draft does not reload, so in-progress edits survive switching
      *  views. A Jobs tap clears loadedEditorDraft first (see
-     *  rebuildJobsList) so tapping a job always reloads it. */
-    private fun showEditor(draftJobId: String, songTitle: String) {
+     *  rebuildJobsList) so tapping a job always reloads it.
+     *  `preloadedResult` is the DraftResult the fresh flow already
+     *  has in memory (from the /jobs poll) — passing it skips a
+     *  redundant GET /draft-result. */
+    private fun showEditor(
+        draftJobId: String, songTitle: String,
+        preloadedResult: JSONObject? = null
+    ) {
         if (draftJobId == loadedEditorDraft && editorAlignment != null) {
             // Already loaded — just show the editor view.
             showEditorView()
             return
         }
-        loadNativeEditor(draftJobId, songTitle)
+        loadNativeEditor(draftJobId, songTitle, preloadedResult)
         showEditorView()
     }
 
@@ -284,13 +297,32 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Load a draft into the native editor: fetch the DraftResult
-     * (alignment + duration), download the vocals WAV for the
-     * waveform + playback, decode the waveform peaks, and populate
-     * the UI. Never crashes on a missing draft or failed audio —
-     * it shows a clear status instead.
+     * Load a draft into the native editor: get the alignment, get the
+     * vocals WAV for the waveform + playback, decode the waveform
+     * peaks, and populate the UI. Never crashes on a missing draft or
+     * failed audio — it shows a clear status instead.
+     *
+     * Speed (why going back to a job was slow): a Jobs tap used to
+     * re-download everything, SEQUENTIALLY — first GET /draft-result
+     * (the full DraftResult JSON, including a ~2.4MB base64 vocals
+     * MP3 the editor never reads — only the alignment + duration are
+     * used), then GET /vocals-raw (the whole vocals WAV, ~20-39MB
+     * for a 3-4 minute song at 44.1kHz), and only then did the editor
+     * appear. On weak WiFi that is tens of seconds.
+     *
+     * Now: (1) the alignment + vocals WAV are cached on disk by
+     * draft id (EditorCache) and a re-open reads them instead of the
+     * network — no network at all on a cache hit; (2) on a cache miss
+     * the draft-result fetch and the vocals download run IN PARALLEL;
+     * (3) the fresh flow passes its in-memory result in, so it never
+     * re-fetches /draft-result at all; (4) the editor appears as soon
+     * as the alignment is ready — the vocals fill the waveform in
+     * when they arrive instead of blocking it.
      */
-    private fun loadNativeEditor(draftJobId: String, songTitle: String) {
+    private fun loadNativeEditor(
+        draftJobId: String, songTitle: String,
+        preloadedResult: JSONObject? = null
+    ) {
         editorRenderJob?.cancel()
         releaseEditorPlayer()
         editorUndoStack.clear()
@@ -299,13 +331,16 @@ class MainActivity : AppCompatActivity() {
         editorDraftJobId = draftJobId
         editorSongTitle = songTitle
         loadedEditorDraft = draftJobId
+        val seq = ++editorLoadSeq
         binding.editorSongTitle.text = songTitle
         binding.editorStatus.visibility = View.GONE
+        binding.editorStatus.setOnClickListener(null)
         binding.editorRenderStatus.visibility = View.GONE
         binding.editorDownloadButton.visibility = View.GONE
         binding.editorRenderButton.isEnabled = false
         binding.editorLoading.visibility = View.VISIBLE
         binding.editorWaveform.setData(null, 0.0, emptyList())
+        binding.editorWaveform.onEmptyTap = null
         binding.editorWordList.removeAllViews()
         if (!SettingsStore.isConfigured(this)) {
             binding.editorLoading.visibility = View.GONE
@@ -316,12 +351,52 @@ class MainActivity : AppCompatActivity() {
         val baseUrl = SettingsStore.getBaseUrl(this)
         val apiKey = SettingsStore.getApiKey(this)
         lifecycleScope.launch {
-            // 1. The alignment (segments/words + duration).
-            val result = withContext(Dispatchers.IO) {
-                ModalClient(baseUrl, apiKey).getDraftResultRaw(draftJobId)
+            // 1. The alignment: the disk cache first (no network on a
+            // hit), else the result already in memory, else the network.
+            var alignment: EditorAlignment? = withContext(Dispatchers.IO) {
+                EditorCache.readDraft(this@MainActivity, draftJobId)
             }
-            val alignment = EditorAlignment.fromDraftResult(result)
+            var vocalsFile: File? = null
+            var vocalsDeferred: kotlinx.coroutines.Deferred<File?>? = null
+            if (alignment != null) {
+                AppLog.d("Editor", "Cache hit for draft $draftJobId — no network for the alignment")
+                vocalsFile = withContext(Dispatchers.IO) {
+                    EditorCache.readVocals(this@MainActivity, draftJobId)
+                }
+            } else if (preloadedResult != null) {
+                // The fresh flow already has this result in memory.
+                alignment = EditorAlignment.fromDraftResult(preloadedResult)
+                if (alignment != null) {
+                    val a = alignment
+                    withContext(Dispatchers.IO) {
+                        EditorCache.saveDraft(this@MainActivity, draftJobId, a)
+                    }
+                }
+            } else {
+                // Cache miss, nothing in memory: fetch the draft
+                // result AND the vocals WAV in parallel, not one
+                // after the other.
+                val client = ModalClient(baseUrl, apiKey)
+                val resultDeferred = async(Dispatchers.IO) {
+                    client.getDraftResultRaw(draftJobId)
+                }
+                vocalsDeferred = async(Dispatchers.IO) {
+                    downloadVocalsWavWithRetry(baseUrl, apiKey, draftJobId)
+                }
+                val result = resultDeferred.await()
+                if (seq != editorLoadSeq) return@launch
+                alignment = EditorAlignment.fromDraftResult(result)
+                if (alignment != null) {
+                    val a = alignment
+                    withContext(Dispatchers.IO) {
+                        EditorCache.saveDraft(this@MainActivity, draftJobId, a)
+                    }
+                }
+            }
             if (alignment == null) {
+                // Nothing to edit against — stop the vocals download
+                // too, there is no alignment to play it against.
+                vocalsDeferred?.cancel()
                 binding.editorLoading.visibility = View.GONE
                 binding.editorStatus.text = getString(R.string.editor_no_alignment)
                 binding.editorStatus.visibility = View.VISIBLE
@@ -329,29 +404,8 @@ class MainActivity : AppCompatActivity() {
                 return@launch
             }
             editorAlignment = alignment
-            // 2. The vocals WAV (waveform + playback). Fall back to
-            // the original downloaded song when it can't be fetched.
-            val vocalsFile = withContext(Dispatchers.IO) {
-                downloadVocalsWav(baseUrl, apiKey, draftJobId)
-            }
-            val audioFile = vocalsFile
-                ?: cachedSendFile?.takeIf { it.exists() }
-            var peaks: FloatArray? = null
-            if (audioFile != null) {
-                val decoded = withContext(Dispatchers.IO) {
-                    AudioDecode.decode(audioFile)
-                }
-                if (decoded != null) {
-                    peaks = AudioDecode.computePeaks(decoded.samples, 1500)
-                }
-            }
-            editorPeaks = peaks
-            // 3. The editor's own MediaPlayer (separate from the
-            // homepage player).
-            if (audioFile != null) {
-                setupEditorPlayer(audioFile)
-            }
-            // 4. Populate the UI.
+            // 2. Show the editor NOW (words + regions). The vocals
+            // fill the waveform in below instead of blocking this.
             binding.editorLoading.visibility = View.GONE
             editorWindowStart = 0.0
             editorWindowDuration = alignment.duration
@@ -359,32 +413,130 @@ class MainActivity : AppCompatActivity() {
             syncWaveform()
             rebuildWordList()
             binding.editorRenderButton.isEnabled = true
-            if (audioFile == null) {
-                binding.editorStatus.text = getString(R.string.editor_no_audio)
-                binding.editorStatus.visibility = View.VISIBLE
-            }
             AppLog.d(
                 "Editor",
                 "Loaded draft $draftJobId: ${alignment.lines.size} lines"
             )
+            // 3. The vocals WAV: the cached file, the parallel
+            // download already running, or a fresh download now.
+            val vocals = vocalsFile
+                ?: vocalsDeferred?.await()
+                ?: withContext(Dispatchers.IO) {
+                    EditorCache.readVocals(this@MainActivity, draftJobId)
+                        ?: downloadVocalsWavWithRetry(baseUrl, apiKey, draftJobId)
+                }
+            if (seq != editorLoadSeq) return@launch
+            // Fall back to the original downloaded song when the
+            // vocals can't be fetched — the waveform still shows.
+            val audioFile = vocals
+                ?: cachedSendFile?.takeIf { it.exists() }
+            if (audioFile != null) {
+                val decoded = withContext(Dispatchers.IO) {
+                    AudioDecode.decode(audioFile)
+                }
+                if (seq != editorLoadSeq) return@launch
+                editorPeaks = decoded?.let {
+                    AudioDecode.computePeaks(it.samples, 1500)
+                }
+                setupEditorPlayer(audioFile)
+                syncWaveform()
+            }
+            if (vocals != null) {
+                // The real vocals are in — clear any retry prompt.
+                binding.editorWaveform.onEmptyTap = null
+                binding.editorStatus.visibility = View.GONE
+                binding.editorStatus.setOnClickListener(null)
+            } else {
+                // The vocals download failed (after retries): the
+                // timings are still editable, and the user can tap
+                // to retry without leaving the editor.
+                showVocalsUnavailable()
+            }
         }
     }
 
-    /** Download /vocals-raw/<draftId> (a WAV) to the cache dir.
-     *  Returns null on any failure — the caller falls back. */
-    private fun downloadVocalsWav(
+    /** Download /vocals-raw/<draftId> (a WAV) into the editor cache,
+     *  with retries on transient failures (connection abort, DNS,
+     *  timeout — the "Software caused connection abort" James hit).
+     *  A 404 means the stem is gone server-side, so it is not
+     *  retried. Returns the cached file, or null. */
+    private suspend fun downloadVocalsWavWithRetry(
         baseUrl: String, apiKey: String, draftJobId: String
     ): File? {
-        return try {
-            val client = ModalClient(baseUrl, apiKey)
-            val file = File(cacheDir, "vocals-$draftJobId.wav")
-            client.openStream("/vocals-raw/$draftJobId").use { input ->
-                file.outputStream().use { out -> input.copyTo(out) }
+        // Already cached (e.g. an earlier attempt finished it).
+        EditorCache.readVocals(this, draftJobId)?.let { return it }
+        for (attempt in 1..3) {
+            try {
+                val client = ModalClient(baseUrl, apiKey)
+                val file = client.openStream("/vocals-raw/$draftJobId").use { input ->
+                    EditorCache.saveVocals(this, draftJobId, input)
+                }
+                if (file != null) {
+                    if (attempt > 1) {
+                        AppLog.d("Editor", "Vocals download worked on attempt $attempt")
+                    }
+                    return file
+                }
+            } catch (e: ModalError) {
+                // 404 = the stem is gone; retrying cannot help.
+                if (e.message?.contains("404") == true) break
+                AppLog.e("Editor", "Vocals download attempt $attempt failed: ${e.message}")
+            } catch (e: IOException) {
+                AppLog.e("Editor", "Vocals download attempt $attempt failed: ${e.message}")
+            } catch (e: Exception) {
+                AppLog.e("Editor", "Vocals download attempt $attempt failed: ${e.message}")
+                break
             }
-            if (file.exists() && file.length() > 0) file else null
-        } catch (e: Exception) {
-            AppLog.e("Editor", "Vocals download failed: ${e.message}")
-            null
+            if (attempt < 3) delay(1000L * attempt)
+        }
+        AppLog.e("Editor", "Vocals download failed after 3 attempts")
+        return null
+    }
+
+    /** The vocals WAV could not be fetched (after retries): the
+     *  timings are still editable, and the user can tap the status
+     *  line — or the empty waveform itself — to retry without
+     *  leaving the editor. */
+    private fun showVocalsUnavailable() {
+        binding.editorStatus.text = "Vocals audio couldn't be downloaded — tap to retry."
+        binding.editorStatus.visibility = View.VISIBLE
+        binding.editorStatus.setOnClickListener { retryVocalsDownload() }
+        binding.editorWaveform.onEmptyTap = { retryVocalsDownload() }
+        binding.editorWaveform.invalidate()
+    }
+
+    /** Manual retry for the vocals WAV (status line or empty
+     *  waveform tap). On success the waveform + player fill in. */
+    private fun retryVocalsDownload() {
+        val draftId = editorDraftJobId
+        if (draftId.isEmpty() || !SettingsStore.isConfigured(this)) return
+        val baseUrl = SettingsStore.getBaseUrl(this)
+        val apiKey = SettingsStore.getApiKey(this)
+        binding.editorStatus.text = "Retrying vocals download…"
+        binding.editorStatus.setOnClickListener(null)
+        binding.editorWaveform.onEmptyTap = null
+        lifecycleScope.launch {
+            val vocals = withContext(Dispatchers.IO) {
+                downloadVocalsWavWithRetry(baseUrl, apiKey, draftId)
+            }
+            if (loadedEditorDraft != draftId) return@launch
+            if (vocals != null) {
+                val decoded = withContext(Dispatchers.IO) {
+                    AudioDecode.decode(vocals)
+                }
+                if (loadedEditorDraft != draftId) return@launch
+                editorPeaks = decoded?.let {
+                    AudioDecode.computePeaks(it.samples, 1500)
+                }
+                setupEditorPlayer(vocals)
+                syncWaveform()
+                binding.editorWaveform.onEmptyTap = null
+                binding.editorStatus.visibility = View.GONE
+                binding.editorStatus.setOnClickListener(null)
+                AppLog.d("Editor", "Vocals retry worked for draft $draftId")
+            } else {
+                showVocalsUnavailable()
+            }
         }
     }
 
@@ -441,6 +593,13 @@ class MainActivity : AppCompatActivity() {
     private fun setupNativeEditor() {
         binding.editorBackButton.setOnClickListener { showHome() }
         val wave = binding.editorWaveform
+        // Panning the waveform (dragging empty space) moves the time
+        // window — keep the parent's window bookkeeping in sync so
+        // the zoom bar and the playhead follow stay correct.
+        wave.onWindowChanged = { start, duration ->
+            editorWindowStart = start
+            editorWindowDuration = duration
+        }
         wave.onWordTap = { ref ->
             editorSelected = ref
             syncWaveform()
@@ -555,10 +714,10 @@ class MainActivity : AppCompatActivity() {
         editorChipViews.clear()
         if (alignment == null) return
         val density = resources.displayMetrics.density
-        // Chips are at least 48dp tall so they are easy to tap.
+        // Chips are at least 56dp tall so they are easy to tap.
         val chipPadH = (12 * density).toInt()
         val chipPadV = (14 * density).toInt()
-        val chipMinH = (48 * density).toInt()
+        val chipMinH = (56 * density).toInt()
         for ((li, line) in alignment.lines.withIndex()) {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -1666,7 +1825,9 @@ class MainActivity : AppCompatActivity() {
         // Past the lyric-fixing step now — the player hides again.
         playerRevealAllowed = false
         binding.audioPlayer.visibility = View.GONE
-        showEditor(draftJobId, songTitle)
+        // Pass the result in: the editor already has it in memory,
+        // so it must not re-fetch /draft-result from the network.
+        showEditor(draftJobId, songTitle, result)
     }
 
     private fun onCancel() {

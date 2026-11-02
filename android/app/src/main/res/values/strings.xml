@@ -39,7 +39,9 @@
     <string name="editor_bg_label">Background:</string>
     <string name="editor_prev">◀ Prev</string>
     <string name="editor_next">Next ▶</string>
-    <string name="editor_words_hint">Words — tap a word to play just it, long-press it to fix its text. Drag a word on the waveform to move it, or drag its edges to resize it.</string>
+    <!-- One line on a phone screen (48 chars, 12sp — see the layout):
+         tap to play, hold (long-press) to edit, drag to move/resize. -->
+    <string name="editor_words_hint">Tap to play · hold to edit · drag to move/resize</string>
     <string name="editor_add_line">+ Add line</string>
     <string name="editor_undo">↩ Undo</string>
     <string name="editor_render_title">Render karaoke MP4</string>

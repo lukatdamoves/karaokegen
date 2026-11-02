@@ -65,6 +65,12 @@ class WaveformView @JvmOverloads constructor(
     var onWordTap: ((WordRef) -> Unit)? = null
     /** Called when the user taps empty waveform (seek there). */
     var onSeekTo: ((Double) -> Unit)? = null
+    /** Called when the user pans the waveform (the visible window moved). */
+    var onWindowChanged: ((Double, Double) -> Unit)? = null
+    /** Set when the vocals audio failed to download: tapping the empty
+     *  waveform retries the download instead of seeking (there is no
+     *  audio to seek through). Null = no retry available. */
+    var onEmptyTap: (() -> Unit)? = null
     /** Called once when a drag starts (the parent pushes an undo snapshot). */
     var onWordDragStart: (() -> Unit)? = null
     /** Called live during a drag with the word's new start/end. */
@@ -156,8 +162,12 @@ class WaveformView @JvmOverloads constructor(
         invalidate()
     }
 
-    /** Scroll the window just enough to keep `time` visible. */
+    /** Scroll the window just enough to keep `time` visible. While
+     *  the user is panning by hand the auto-follow pauses — the
+     *  playhead must not yank the window out from under their finger.
+     *  It resumes on the next tick after the pan ends. */
     fun ensureVisible(time: Double) {
+        if (panning) return
         if (time < windowStart) {
             setWindow(time, windowDuration)
         } else if (time > windowStart + windowDuration) {
@@ -218,9 +228,18 @@ class WaveformView @JvmOverloads constructor(
                 x += 2f
             }
         } else {
+            // No peaks (the vocals WAV could not be downloaded/decoded).
+            // Drawn at the TOP of the waveform area, just under the ruler
+            // — never at the middle, where it used to overlap the word
+            // labels ("agad", "bumagal?") drawn at waveMid. When a retry
+            // is available the hint says so (tapping retries, see touch).
+            val hint = if (onEmptyTap != null) {
+                "No waveform — tap to retry"
+            } else {
+                "No waveform — timings still editable"
+            }
             canvas.drawText(
-                "No waveform — timings still editable",
-                w / 2f, waveMid, hintPaint
+                hint, w / 2f, waveTop + hintPaint.textSize, hintPaint
             )
         }
 
@@ -275,7 +294,7 @@ class WaveformView @JvmOverloads constructor(
     // Touch: tap to select/seek, drag body to move, drag edges to resize.
     // ------------------------------------------------------------------
 
-    private enum class DragMode { NONE, BODY, LEFT, RIGHT }
+    private enum class DragMode { NONE, BODY, LEFT, RIGHT, PAN }
 
     private var dragMode = DragMode.NONE
     private var dragWord: WaveWord? = null
@@ -286,6 +305,11 @@ class WaveformView @JvmOverloads constructor(
     private var dragLowBound = 0.0
     private var dragHighBound = 0.0
     private var dragMoved = false
+    // Pan state: dragging empty waveform space scrolls the visible
+    // time window. While a pan is in progress the playback
+    // auto-follow pauses (see ensureVisible).
+    private var panning = false
+    private var panWindowStart = 0.0
     private val edgeSlopPx = 14f * density
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -294,6 +318,7 @@ class WaveformView @JvmOverloads constructor(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 dragMoved = false
+                panning = false
                 dragDownX = x
                 dragDownTime = time
                 val hit = hitWord(time, x)
@@ -313,12 +338,34 @@ class WaveformView @JvmOverloads constructor(
                     // moves (see ACTION_MOVE), so a plain tap does
                     // not push a useless undo entry.
                 } else {
-                    dragMode = DragMode.NONE
+                    // Empty waveform: this finger may become a PAN
+                    // (scroll the time window) or a tap (seek / retry).
+                    // Decided on MOVE/UP by whether it moved past
+                    // the touch slop — a word drag can never start
+                    // here because no word was hit.
                     dragWord = null
+                    dragMode = DragMode.PAN
+                    panWindowStart = windowStart
+                    parent.requestDisallowInterceptTouchEvent(true)
                 }
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
+                if (dragMode == DragMode.PAN) {
+                    if (!dragMoved && abs(x - dragDownX) > touchSlop) {
+                        // A real pan just began.
+                        dragMoved = true
+                        panning = true
+                    }
+                    if (!dragMoved) return true
+                    // Content follows the finger: dragging right shows
+                    // earlier time (window start moves left).
+                    val newStart = panWindowStart +
+                        (dragDownX - x) / width * windowDuration
+                    setWindow(newStart, windowDuration)
+                    onWindowChanged?.invoke(windowStart, windowDuration)
+                    return true
+                }
                 if (dragWord == null) return true
                 if (!dragMoved && abs(x - dragDownX) > touchSlop) {
                     // A real drag just began — snapshot for undo now.
@@ -349,7 +396,7 @@ class WaveformView @JvmOverloads constructor(
                             dragOrigStart + 0.05, dragHighBound
                         )
                     }
-                    DragMode.NONE -> { /* no-op */ }
+                    DragMode.NONE, DragMode.PAN -> { /* no-op */ }
                 }
                 onWordChanged?.invoke(
                     WordRef(word.line, word.word), word.start, word.end
@@ -364,15 +411,29 @@ class WaveformView @JvmOverloads constructor(
                 val upTime = xToTime(event.x)
                 dragWord = null
                 dragMode = DragMode.NONE
+                panning = false
                 parent.requestDisallowInterceptTouchEvent(false)
                 if (event.actionMasked == MotionEvent.ACTION_UP) {
-                    if (wasDrag && word != null && mode != DragMode.NONE) {
-                        onWordDragEnd?.invoke()
-                    } else if (word != null) {
-                        onWordTap?.invoke(WordRef(word.line, word.word))
-                    } else {
-                        // Tapped empty waveform: seek there.
-                        onSeekTo?.invoke(upTime.coerceIn(0.0, max(0.0, duration)))
+                    when {
+                        wasDrag && word != null && mode != DragMode.NONE &&
+                            mode != DragMode.PAN -> onWordDragEnd?.invoke()
+                        wasDrag && mode == DragMode.PAN -> {
+                            // A pan finished — nothing to do; the
+                            // window is already where the finger left it.
+                        }
+                        word != null -> {
+                            onWordTap?.invoke(WordRef(word.line, word.word))
+                        }
+                        mode == DragMode.PAN && peaks == null &&
+                            onEmptyTap != null -> {
+                            // Tapped the empty waveform with no audio:
+                            // retry the vocals download.
+                            onEmptyTap?.invoke()
+                        }
+                        else -> {
+                            // Tapped empty waveform: seek there.
+                            onSeekTo?.invoke(upTime.coerceIn(0.0, max(0.0, duration)))
+                        }
                     }
                 }
                 invalidate()

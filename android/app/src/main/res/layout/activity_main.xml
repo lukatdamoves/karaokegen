@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One page: home form, editor (WebView) and jobs list all live here,
-     switched by visibility. The sidebar (NavigationView) holds Home,
-     Editor, Jobs, Backend settings and Copy logs. -->
+<!-- One page: home form (with the editor WebView inline at the
+     bottom once an alignment finishes) and the jobs list all live
+     here, switched by visibility. The sidebar (NavigationView) holds
+     Home, Editor, Jobs, Backend settings and Copy logs. -->
 <androidx.drawerlayout.widget.DrawerLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -329,44 +330,48 @@
                         android:textAppearance="?attr/textAppearanceBodyMedium"
                         android:visibility="gone" />
 
+                    <!-- EDITOR: the desktop editor in a WebView, inline at
+                         the bottom of this same page (no separate view).
+                         Shown when an alignment finishes; the page
+                         scrolls down to it. The WebView is sized to its
+                         full content height in code (600dp is the
+                         fallback), so the outer ScrollView does the
+                         scrolling — one page. -->
+                    <LinearLayout
+                        android:id="@+id/editorSection"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="24dp"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/nav_editor"
+                            android:textAppearance="?attr/textAppearanceTitleMedium" />
+
+                        <FrameLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp">
+
+                            <WebView
+                                android:id="@+id/editorWebView"
+                                android:layout_width="match_parent"
+                                android:layout_height="600dp" />
+
+                            <ProgressBar
+                                android:id="@+id/editorLoading"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_gravity="center" />
+
+                        </FrameLayout>
+                    </LinearLayout>
+
                 </LinearLayout>
             </ScrollView>
-
-            <!-- EDITOR: the desktop editor in a WebView, inline on this page.
-                 Shown when an alignment finishes (or from the sidebar). -->
-            <LinearLayout
-                android:id="@+id/editorView"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:orientation="vertical"
-                android:visibility="gone">
-
-                <Button
-                    android:id="@+id/editorBackButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_margin="8dp"
-                    android:text="@string/editor_back"
-                    style="?attr/materialButtonOutlinedStyle" />
-
-                <FrameLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="0dp"
-                    android:layout_weight="1">
-
-                    <WebView
-                        android:id="@+id/editorWebView"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent" />
-
-                    <ProgressBar
-                        android:id="@+id/editorLoading"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_gravity="center" />
-
-                </FrameLayout>
-            </LinearLayout>
 
             <!-- JOBS: the job queue (sidebar). Simple list, newest first. -->
             <ScrollView

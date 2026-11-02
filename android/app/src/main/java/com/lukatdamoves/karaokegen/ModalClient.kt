@@ -1,16 +1,20 @@
 package com.lukatdamoves.karaokegen
 
 import android.util.Base64
+import okhttp3.Dns
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okhttp3.dnsoverhttps.DnsOverHttps
 import org.json.JSONObject
 import java.io.File
 import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
+import java.net.InetAddress
 import java.util.concurrent.TimeUnit
 
 /** Plain-language failure from the Modal backend step. Shown on screen as-is. */
@@ -36,7 +40,41 @@ class ModalClient(baseUrl: String, private val apiKey: String) {
         get() = sharedClient
 
     companion object {
+        /**
+         * DNS-over-HTTPS (Cloudflare) with a system-DNS fallback. The
+         * phone's carrier DNS drops "Unable to resolve host" blips,
+         * which made the draft poll hiccup. DoH bypasses the carrier
+         * resolver; if a DoH lookup fails for any reason it falls back
+         * to the system DNS, so the worst case is exactly today's
+         * behaviour, never worse. The bootstrap client uses plain
+         * system DNS (no DoH), so there is no recursion. If DoH
+         * itself can't even be built, plain system DNS is used.
+         */
+        private fun buildDns(): Dns {
+            return try {
+                val doh = DnsOverHttps.Builder()
+                    .client(OkHttpClient.Builder().build())
+                    .url("https://1.1.1.1/dns-query".toHttpUrl())
+                    .bootstrapDnsHosts(
+                        InetAddress.getByName("1.1.1.1"),
+                        InetAddress.getByName("1.0.0.1")
+                    )
+                    .includeIPv6(false)
+                    .build()
+                Dns { hostname ->
+                    try {
+                        doh.lookup(hostname)
+                    } catch (e: Exception) {
+                        Dns.SYSTEM.lookup(hostname)
+                    }
+                }
+            } catch (e: Exception) {
+                Dns.SYSTEM
+            }
+        }
+
         private val sharedClient = OkHttpClient.Builder()
+            .dns(buildDns())
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(300, TimeUnit.SECONDS)
             .writeTimeout(300, TimeUnit.SECONDS)

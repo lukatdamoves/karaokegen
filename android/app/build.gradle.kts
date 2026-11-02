@@ -11,11 +11,11 @@ android {
         applicationId = "com.lukatdamoves.karaokegen"
         minSdk = 26
         targetSdk = 35
-        versionCode = 24
+        versionCode = 25
         // Full version (0.2.0): the editor + render, not just the trial
         // draft. Bump versionCode on EVERY release — the in-app
         // updater compares it against the APK asset on GitHub Releases.
-        versionName = "0.2.7-trial"
+        versionName = "0.2.8-trial"
     }
 
     // Release signing comes from CI-injected properties (see android/README.md).
@@ -113,6 +113,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // DNS-over-HTTPS (Cloudflare) with a system-DNS fallback — the
+    // phone's carrier DNS drops "Unable to resolve host" blips that
+    // made the draft poll hiccup. Same 4.12.0 as okhttp.
+    implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")
     // Tiny localhost HTTP server for the editor (serves editor.html and
     // proxies /api/* to the Modal backend). Much lighter than Ktor.
     implementation("org.nanohttpd:nanohttpd:2.3.1")

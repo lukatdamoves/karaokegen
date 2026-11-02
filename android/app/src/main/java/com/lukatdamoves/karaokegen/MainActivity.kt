@@ -48,11 +48,11 @@ import java.util.Locale
  * does the whole thing (download the audio, then draft it on the Modal
  * backend — with lyrics, or transcribe when the lyrics box is empty).
  *
- * The page has three views, switched by visibility: home (the form),
- * editor (the desktop editor in a WebView, served from the in-app
- * localhost server) and jobs (the job queue). The sidebar holds Home,
- * Editor, Jobs, Backend settings and Copy logs. Update check runs
- * silently on launch.
+ * The page has two views, switched by visibility: home (the form,
+ * with the editor WebView inline at the bottom once an alignment
+ * finishes) and jobs (the job queue). The sidebar holds Home, Editor,
+ * Jobs, Backend settings and Copy logs. Update check runs silently
+ * on launch.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -85,6 +85,10 @@ class MainActivity : AppCompatActivity() {
     private var playerFile: File? = null
     private var playerTicker: Job? = null
     private var playerSeeking = false
+    // The player row is only allowed to show once a transcript is in
+    // the lyrics box (the user is fixing lyrics). It is prepared as
+    // soon as the audio downloads, but stays hidden until then.
+    private var playerRevealAllowed = false
 
     private val fileChooserLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -166,7 +170,6 @@ class MainActivity : AppCompatActivity() {
 
         binding.startButton.setOnClickListener { onStartTapped() }
         binding.cancelButton.setOnClickListener { onCancel() }
-        binding.editorBackButton.setOnClickListener { showHome() }
         binding.playerPlayButton.setOnClickListener { onPlayerPlayPause() }
         binding.playerSeekBar.setOnSeekBarChangeListener(
             object : SeekBar.OnSeekBarChangeListener {
@@ -197,7 +200,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Back: close the drawer first; in the editor, go back in the
-        // WebView first; from the editor or jobs, return home.
+        // WebView first; from jobs, return home.
         // (Object form, not the lambda overload — that lives in
         // activity-ktx, which this app does not depend on.)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -205,11 +208,13 @@ class MainActivity : AppCompatActivity() {
                 when {
                     binding.drawerLayout.isDrawerOpen(GravityCompat.START) ->
                         binding.drawerLayout.closeDrawer(GravityCompat.START)
-                    binding.editorView.visibility == View.VISIBLE &&
+                    // The editor lives inline at the bottom of the home
+                    // page now — there is no separate editor view to
+                    // leave, so Back only goes back inside the WebView.
+                    binding.editorSection.visibility == View.VISIBLE &&
                         binding.editorWebView.canGoBack() ->
                         binding.editorWebView.goBack()
-                    binding.editorView.visibility == View.VISIBLE ||
-                        binding.jobsView.visibility == View.VISIBLE ->
+                    binding.jobsView.visibility == View.VISIBLE ->
                         showHome()
                     else -> {
                         isEnabled = false
@@ -239,11 +244,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------------
-    // Views: home / editor / jobs (one Activity, toggled by visibility).
+    // Views: home / jobs (one Activity, toggled by visibility). The
+    // editor lives inline at the bottom of the home page.
     // ------------------------------------------------------------------
 
     private fun showHome() {
-        binding.editorView.visibility = View.GONE
         binding.jobsView.visibility = View.GONE
         binding.homeView.visibility = View.VISIBLE
         binding.toolbar.title = getString(R.string.app_name)
@@ -252,15 +257,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun showJobs() {
         binding.homeView.visibility = View.GONE
-        binding.editorView.visibility = View.GONE
         binding.jobsView.visibility = View.VISIBLE
         binding.toolbar.title = getString(R.string.jobs_title)
         binding.navView.setCheckedItem(R.id.nav_jobs)
         rebuildJobsList()
     }
 
-    /** Sidebar Editor: resume the last draft if there is one, else
-     *  the editor's own draft form. */
+    /** Sidebar Editor: scroll to the inline editor if a draft is
+     *  loaded (or a finished job exists); otherwise there is nothing
+     *  to edit yet. */
     private fun openEditorFromDrawer() {
         if (lastDraftJobId.isNotEmpty()) {
             showEditor(lastDraftJobId, lastCallId, lastSongTitle)
@@ -270,25 +275,19 @@ class MainActivity : AppCompatActivity() {
         if (latest != null) {
             showEditor(latest.draftJobId, latest.callId, latest.title)
         } else {
-            showEditor("", "", "")
+            Toast.makeText(this, "Run a draft first", Toast.LENGTH_SHORT).show()
         }
     }
 
-    /** Show the editor view and load the draft (?draft= draft id,
-     *  ?call= Modal call id, ?name= song title). The server seeds those
-     *  into localStorage before editor.js runs, so the editor's own
-     *  resume logic picks the draft up and shows the waveform + word
-     *  regions. Re-opening the same draft does not reload the page. */
+    /** Show the editor inline at the bottom of the home page and load
+     *  the draft (?draft= draft id, ?call= Modal call id, ?name= song
+     *  title). The server seeds those into localStorage before
+     *  editor.js runs, so the editor's own resume logic picks the
+     *  draft up and shows the waveform + word regions. The toolbar
+     *  title stays "KaraokeGen" — this is the same page, not a new
+     *  one. Re-opening the same draft does not reload the page, so
+     *  in-progress edits in the editor survive switching views. */
     private fun showEditor(draftJobId: String, callId: String, songTitle: String) {
-        binding.homeView.visibility = View.GONE
-        binding.jobsView.visibility = View.GONE
-        binding.editorView.visibility = View.VISIBLE
-        // Cap the title: a long YouTube title ran under the status-bar
-        // icons. ~40 chars with an ellipsis.
-        val title = songTitle.ifEmpty { getString(R.string.nav_editor) }
-        binding.toolbar.title =
-            if (title.length > 40) title.take(37) + "…" else title
-        binding.navView.setCheckedItem(R.id.nav_editor)
         lastDraftJobId = draftJobId
         lastCallId = callId
         lastSongTitle = songTitle
@@ -299,6 +298,16 @@ class MainActivity : AppCompatActivity() {
         if (draftJobId != loadedEditorDraft) {
             loadEditor(draftJobId, callId, songTitle)
             loadedEditorDraft = draftJobId
+        }
+        // Back on the home page (the editor is part of it), reveal the
+        // editor section, then scroll the page down to it.
+        binding.jobsView.visibility = View.GONE
+        binding.homeView.visibility = View.VISIBLE
+        binding.toolbar.title = getString(R.string.app_name)
+        binding.navView.setCheckedItem(R.id.nav_editor)
+        binding.editorSection.visibility = View.VISIBLE
+        binding.editorSection.post {
+            binding.homeView.smoothScrollTo(0, binding.editorSection.top)
         }
     }
 
@@ -350,6 +359,12 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView, url: String) {
                 binding.editorLoading.visibility = View.GONE
+                // Size the WebView to its content (see resizeEditorWebView).
+                // The editor reveals its edit/render sections dynamically
+                // once the draft loads, so re-measure after they appear.
+                resizeEditorWebView()
+                view.postDelayed({ resizeEditorWebView() }, 2000)
+                view.postDelayed({ resizeEditorWebView() }, 5000)
             }
         }
         webView.webChromeClient = object : WebChromeClient() {
@@ -400,6 +415,34 @@ class MainActivity : AppCompatActivity() {
                     this, "Download failed: ${e.message}",
                     Toast.LENGTH_LONG
                 ).show()
+            }
+        }
+    }
+
+    /**
+     * Size the editor WebView to its full content height so the outer
+     * ScrollView does the scrolling (one page). The editor page is
+     * taller than the screen; a fixed-height WebView would scroll
+     * inside itself and fight the page. scrollHeight is CSS px —
+     * multiply by the display density for Android px. A failed or
+     * empty result keeps the current (fallback) height.
+     */
+    private fun resizeEditorWebView() {
+        val webView = binding.editorWebView
+        webView.evaluateJavascript(
+            "(function(){return document.documentElement.scrollHeight " +
+            "|| document.body.scrollHeight || 0})()"
+        ) { raw ->
+            val cssPx = raw?.trim()?.trim('"')?.toDoubleOrNull()
+            if (cssPx == null || cssPx <= 0) return@evaluateJavascript
+            val density = resources.displayMetrics.density
+            val px = (cssPx * density).toInt()
+            val minPx = (600 * density).toInt()
+            val height = if (px < minPx) minPx else px
+            val params = webView.layoutParams
+            if (params.height != height) {
+                params.height = height
+                webView.layoutParams = params
             }
         }
     }
@@ -468,11 +511,14 @@ class MainActivity : AppCompatActivity() {
 
     /** Set the player up for the downloaded audio file (called once
      *  the file is ready — both the fresh-download and the reuse
-     *  path). Replaces any previous song's player. */
+     *  path). Replaces any previous song's player. The player is
+     *  prepared here but the row stays HIDDEN until a transcript is
+     *  in the lyrics box (showDraftDone reveals it) — showing it as
+     *  soon as the audio downloads was too early. */
     private fun setupAudioPlayer(file: File) {
         releasePlayer()
         playerFile = file
-        binding.audioPlayer.visibility = View.VISIBLE
+        binding.audioPlayer.visibility = View.GONE
         binding.playerPlayButton.isEnabled = false
         binding.playerPlayButton.text = getString(R.string.player_play)
         binding.playerSeekBar.progress = 0
@@ -510,6 +556,12 @@ class MainActivity : AppCompatActivity() {
                 binding.playerTimeLabel.text =
                     "${formatDuration(0)} / ${formatDuration((dur / 1000).toLong())}"
                 binding.playerPlayButton.isEnabled = true
+                // Only reveal the row if a transcript is already waiting
+                // to be fixed (playerRevealAllowed). Otherwise it stays
+                // hidden until showDraftDone turns it on.
+                if (playerRevealAllowed) {
+                    binding.audioPlayer.visibility = View.VISIBLE
+                }
                 mp.setOnCompletionListener {
                     binding.playerSeekBar.progress = 0
                     binding.playerTimeLabel.text =
@@ -669,6 +721,10 @@ class MainActivity : AppCompatActivity() {
         // applies right after a transcribe, and showDraftDone sets it.
         binding.startButton.text = getString(R.string.start)
         clearError()
+        // Fresh run: the player hides again until a new transcript is
+        // there to fix (showDraftDone reveals it).
+        playerRevealAllowed = false
+        binding.audioPlayer.visibility = View.GONE
         val lyrics = binding.lyricsInput.text?.toString().orEmpty()
         // Empty lyrics means "transcribe" automatically.
         val transcribe = lyrics.isBlank()
@@ -816,8 +872,14 @@ class MainActivity : AppCompatActivity() {
                     } catch (e: IOException) {
                         failedPolls++
                         AppLog.d("Main", "Poll failed ($failedPolls/10): ${e.message}")
-                        binding.draftStatus.text =
-                            "Connection hiccup — retrying… ($failedPolls/10)"
+                        // Stay quiet for the first couple of blips — keep
+                        // showing the last progress instead of flashing a
+                        // scary message. Only after 3 in a row is it
+                        // worth saying anything.
+                        if (failedPolls >= 3) {
+                            binding.draftStatus.text =
+                                "Connection hiccup — retrying… ($failedPolls/10)"
+                        }
                         if (failedPolls >= 10) {
                             AppLog.e("Main", "Poll gave up after 10 failures")
                             showError(
@@ -941,6 +1003,12 @@ class MainActivity : AppCompatActivity() {
             binding.draftResult.text = getString(R.string.transcript_ready_hint)
             binding.draftResult.visibility = View.VISIBLE
             binding.startButton.text = getString(R.string.run_alignment)
+            // The transcript is in the box — now the player may show,
+            // so the song can be heard while the lyrics are fixed.
+            playerRevealAllowed = true
+            if (mediaPlayer != null) {
+                binding.audioPlayer.visibility = View.VISIBLE
+            }
             AppLog.d("Main", "Transcript ready (${transcript.length} chars) — waiting for edits")
             return
         }
@@ -961,6 +1029,9 @@ class MainActivity : AppCompatActivity() {
             " — $lines lines, $words words. Opening the editor…"
         binding.draftResult.visibility = View.VISIBLE
         binding.startButton.text = getString(R.string.start)
+        // Past the lyric-fixing step now — the player hides again.
+        playerRevealAllowed = false
+        binding.audioPlayer.visibility = View.GONE
         showEditor(draftJobId, callId, songTitle)
     }
 

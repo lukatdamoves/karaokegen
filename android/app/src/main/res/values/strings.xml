@@ -40,7 +40,6 @@
     <string name="nav_header_subtitle">Turn any song into a karaoke video</string>
     <string name="drawer_open">Open menu</string>
     <string name="drawer_close">Close menu</string>
-    <string name="editor_back">← Back</string>
     <string name="jobs_title">Jobs</string>
     <string name="jobs_empty">No jobs yet — start a song from Home.</string>
 

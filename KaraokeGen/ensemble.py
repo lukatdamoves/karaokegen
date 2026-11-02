@@ -613,7 +613,8 @@ def align_lyrics_ensemble(model, vocals_asr_path: str, lead_raw_path: str,
             ctc_audio = vocals_asr_path
             if getattr(s, "word_ctc_source", "mix") == "mix" and Path(mix_path).exists():
                 ctc_audio = mix_path
-            w_result, _ = word_ctc.refine_word_timings(w_result, ctc_audio, s)
+            w_result, _ = word_ctc.refine_word_timings(
+                w_result, ctc_audio, s, onset_audio_path=lead_raw_path)
         except Exception as exc:
             log.warning("Word CTC ensemble failed (%s); keeping stable-ts words.", exc)
     return w_result

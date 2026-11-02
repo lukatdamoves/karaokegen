@@ -335,7 +335,8 @@ def verify_alignment(result: AlignmentResult, expected_text: str, s: Settings = 
         for w in ln.words:
             act_words.append(norm_word(word_text(w)))
             try:
-                p = float(getattr(w, "probability", 1.0) or 1.0)
+                _p = getattr(w, "probability", None)
+                p = 1.0 if _p is None else float(_p)
             except (TypeError, ValueError):
                 p = 1.0
             if p < 0.5:

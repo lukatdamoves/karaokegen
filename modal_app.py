@@ -791,6 +791,14 @@ def run_draft(audio_b64: str, language: str, lyrics: str,
     work = Path(FILES_VOL_PATH) / "jobs" / job_id
     work.mkdir(parents=True, exist_ok=True)
     files_vol.reload()
+    # Empty language ("") kills stable-ts (it needs a concrete code).
+    # Resolve it from the lyrics the user sent; default "tl" when there
+    # are no lyrics (the transcribe flow routes English later via
+    # tag_ratio/Qwen). Defense-in-depth: the app never sends "" now,
+    # but any other client (desktop, direct API call) still can.
+    if not (language or "").strip():
+        from KaraokeGen.word_ctc import tag_ratio_text
+        language = "en" if (lyrics or "").strip() and tag_ratio_text(lyrics) < 0.01 else "tl"
     s = Settings(language=language, genre=genre, work_dir=work)
 
     prog = Progress(work)

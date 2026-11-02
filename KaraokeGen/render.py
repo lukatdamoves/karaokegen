@@ -23,6 +23,15 @@ from KaraokeGen.models import AlignmentResult, LineNote, Segment, Word
 log = logging.getLogger(__name__)
 
 
+def _prob(w) -> float:
+    """Word probability, defaulting to 1.0 only when missing (None).
+
+    A real 0.0 (interpolated/padding token) must stay 0.0 so the ghost
+    filter and verify_alignment can see it — `or 1.0` masked it."""
+    p = getattr(w, "probability", None)
+    return 1.0 if p is None else float(p)
+
+
 def escape_ass(text: str, s: Settings = settings) -> str:
     """Escape text for ASS. The Text field is the LAST Dialogue field, so
     commas need no protection. Literal braces are backslash-escaped and
@@ -125,7 +134,7 @@ def _word_karaoke_body(seg: Segment, s: Settings = settings) -> str:
         fixed: list[Word] = []
         for w, tok in zip(highlight_words, display_tokens):
             fixed.append(Word(text=tok, start=float(w.start), end=float(w.end),
-                              probability=float(getattr(w, "probability", 1.0) or 1.0)))
+                              probability=_prob(w)))
         highlight_words = fixed
     else:
         # Synthesize: evenly split seg span across display tokens
@@ -562,7 +571,7 @@ def from_stable_ts(result, line_notes=None) -> AlignmentResult:
                 text=txt,
                 start=word_start(w, 0.0),
                 end=word_end(w, word_start(w, 0.0) + 0.1),
-                probability=float(getattr(w, "probability", 1.0) or 1.0),
+                probability=_prob(w),
             ))
         if not words:
             continue

@@ -1179,7 +1179,7 @@ def align_lyrics(model, vocals, text, s: Settings = settings) -> AlignmentResult
     _replace_asr_with_official remaps the official text by segment duration."""
     text = (text or "").strip()
     align_kwargs = dict(
-        language=s.language,
+        language=(s.language or "tl"),
         original_split=True,
         suppress_silence=bool(getattr(s, "align_suppress_silence", True)),
         vad=True,
@@ -1199,7 +1199,7 @@ def align_lyrics(model, vocals, text, s: Settings = settings) -> AlignmentResult
     try:
         st_result = model.align(vocals, text, **align_kwargs)
     except TypeError:
-        st_result = model.align(vocals, text, language=s.language, original_split=True)
+        st_result = model.align(vocals, text, language=(s.language or "tl"), original_split=True)
     if s.refine_timings:
         try:
             st_result = _refine_for_singing(model, str(vocals), st_result, s)
@@ -1275,7 +1275,8 @@ def _refine_for_singing(model, vocals, result, s: Settings = settings):
 
 def _word_prob(w) -> float:
     try:
-        return float(getattr(w, "probability", 1.0) or 1.0)
+        p = getattr(w, "probability", None)
+        return 1.0 if p is None else float(p)
     except (TypeError, ValueError):
         return 1.0
 
@@ -1312,6 +1313,9 @@ def _filter_ghost_words(result: AlignmentResult, s: Settings = settings) -> Alig
         kept = []
         for w in seg.words:
             if w is None:
+                continue
+            if _is_padding_word(w):
+                removed_words += 1
                 continue
             p = _word_prob(w)
             dur = max(0.0, float(getattr(w, "end", 0)) - float(getattr(w, "start", 0)))

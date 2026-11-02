@@ -71,14 +71,16 @@ class MainActivity : AppCompatActivity() {
     // Editor (inline WebView) state.
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
     private var webViewSetupDone = false
-    // Draft id currently loaded in the WebView (null = nothing loaded
-    // yet). A repeat open of the same draft does NOT reload the page,
-    // so in-progress edits in the editor survive switching views.
+    // Draft id + call id currently loaded in the WebView (null =
+    // nothing loaded yet). A repeat open of the same draft AND call
+    // does NOT reload the page, so in-progress edits in the editor
+    // survive switching views. Both are compared: the draft id is
+    // the AUDIO HASH, so a different run of the same song shares it
+    // but has a different call id — comparing only the draft id
+    // wrongly skipped the reload, and tapping a job for the same
+    // song did nothing.
     private var loadedEditorDraft: String? = null
-    // Last draft shown in the editor, for the sidebar Editor item.
-    private var lastDraftJobId = ""
-    private var lastCallId = ""
-    private var lastSongTitle = ""
+    private var loadedEditorCall: String? = null
 
     // Audio player (listen while fixing the lyrics).
     private var mediaPlayer: MediaPlayer? = null
@@ -128,10 +130,6 @@ class MainActivity : AppCompatActivity() {
             when (item.itemId) {
                 R.id.nav_home -> {
                     showHome()
-                    true
-                }
-                R.id.nav_editor -> {
-                    openEditorFromDrawer()
                     true
                 }
                 R.id.nav_jobs -> {
@@ -263,48 +261,35 @@ class MainActivity : AppCompatActivity() {
         rebuildJobsList()
     }
 
-    /** Sidebar Editor: scroll to the inline editor if a draft is
-     *  loaded (or a finished job exists); otherwise there is nothing
-     *  to edit yet. */
-    private fun openEditorFromDrawer() {
-        if (lastDraftJobId.isNotEmpty()) {
-            showEditor(lastDraftJobId, lastCallId, lastSongTitle)
-            return
-        }
-        val latest = JobStore.getLatestDone(this)
-        if (latest != null) {
-            showEditor(latest.draftJobId, latest.callId, latest.title)
-        } else {
-            Toast.makeText(this, "Run a draft first", Toast.LENGTH_SHORT).show()
-        }
-    }
-
     /** Show the editor inline at the bottom of the home page and load
      *  the draft (?draft= draft id, ?call= Modal call id, ?name= song
      *  title). The server seeds those into localStorage before
      *  editor.js runs, so the editor's own resume logic picks the
      *  draft up and shows the waveform + word regions. The toolbar
      *  title stays "KaraokeGen" — this is the same page, not a new
-     *  one. Re-opening the same draft does not reload the page, so
-     *  in-progress edits in the editor survive switching views. */
+     *  one. Re-opening the same draft AND call does not reload the
+     *  page, so in-progress edits in the editor survive switching
+     *  views. A previous job opened from the Jobs list passes an
+     *  EMPTY call id (resume by draft only — see LocalApiServer):
+     *  the old call id is stale, and the editor's alive-check on
+     *  /api/jobs/<callId> treats any fetch failure as a dead job
+     *  and wipes it, so a finished job must not depend on it. */
     private fun showEditor(draftJobId: String, callId: String, songTitle: String) {
-        lastDraftJobId = draftJobId
-        lastCallId = callId
-        lastSongTitle = songTitle
         if (!webViewSetupDone) {
             setupEditorWebView()
             webViewSetupDone = true
         }
-        if (draftJobId != loadedEditorDraft) {
+        if (draftJobId != loadedEditorDraft || callId != loadedEditorCall) {
             loadEditor(draftJobId, callId, songTitle)
             loadedEditorDraft = draftJobId
+            loadedEditorCall = callId
         }
         // Back on the home page (the editor is part of it), reveal the
         // editor section, then scroll the page down to it.
         binding.jobsView.visibility = View.GONE
         binding.homeView.visibility = View.VISIBLE
         binding.toolbar.title = getString(R.string.app_name)
-        binding.navView.setCheckedItem(R.id.nav_editor)
+        binding.navView.setCheckedItem(R.id.nav_home)
         binding.editorSection.visibility = View.VISIBLE
         binding.editorSection.post {
             binding.homeView.smoothScrollTo(0, binding.editorSection.top)
@@ -477,7 +462,17 @@ class MainActivity : AppCompatActivity() {
                 )
                 setBackgroundResource(outValue.resourceId)
                 setOnClickListener {
-                    showEditor(job.draftJobId, job.callId, job.title)
+                    // Open a PREVIOUS job by draft only (empty call
+                    // id). The old call id is stale — the editor's
+                    // alive-check on /api/jobs/<callId> treats any
+                    // fetch failure as a dead job and wipes it, so a
+                    // finished job is resumed from the persistent
+                    // draft result instead (see LocalApiServer).
+                    // Force a reload even for the same job, so a
+                    // re-tap retries after a failed load.
+                    loadedEditorDraft = null
+                    loadedEditorCall = null
+                    showEditor(job.draftJobId, "", job.title)
                 }
             }
             val titleView = TextView(this).apply {

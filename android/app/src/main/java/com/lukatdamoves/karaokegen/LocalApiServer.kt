@@ -185,6 +185,35 @@ object LocalApiServer : NanoHTTPD("127.0.0.1", 0) {
             seed.append("localStorage.setItem('kg_call_id',")
                 .append(JSONObject.quote(callId)).append(");")
         }
+        if (draftId.isNotEmpty() && callId.isEmpty()) {
+            // Resume of a PREVIOUS (finished) job, opened by draft
+            // only — no call id. Clear any stale call id so the
+            // editor's alive-check (checkResumable case 0) cannot run
+            // on it: that check fetches /api/jobs/<callId> and treats
+            // ANY fetch failure (a transient abort on weak Wi-Fi) as
+            // a dead job, wiping the saved draft and showing a blank
+            // form. Instead, fetch the persistent draft result here
+            // and seed it as kg_draft_result, so checkResumable case 2
+            // (restoreFromStorage) shows the waveform without ever
+            // touching /api/jobs. The vocals base64 is stripped: it
+            // is megabytes, localStorage cannot hold it, and
+            // restoreFromStorage does not need it (the waveform audio
+            // is fetched separately via /api/vocals-raw). If the
+            // fetch fails, nothing is seeded and the editor falls
+            // back to its draft form (safe, not a crash).
+            seed.append("localStorage.removeItem('kg_call_id');")
+            val draftResult = try {
+                modalClient().getDraftResultRaw(draftId)
+            } catch (_: Exception) {
+                null
+            }
+            if (draftResult != null) {
+                draftResult.remove("vocals_audio_b64")
+                seed.append("localStorage.setItem('kg_draft_result',")
+                    .append(JSONObject.quote(draftResult.toString()))
+                    .append(");")
+            }
+        }
         if (fileName.isNotEmpty()) {
             seed.append("localStorage.setItem('kg_file_name',")
                 .append(JSONObject.quote(fileName)).append(");")

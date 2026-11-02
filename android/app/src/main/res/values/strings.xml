@@ -22,6 +22,10 @@
     <string name="transcript_ready_hint">Transcript ready — fix the text in the lyrics box above, then tap “Run alignment”. The timing run reuses the separated audio, so it skips straight to alignment.</string>
 
     <string name="audio_ready">Audio ready.</string>
+    <string name="player_play">▶ Play</string>
+    <string name="player_pause">⏸ Pause</string>
+    <string name="player_loading">Loading audio…</string>
+    <string name="player_error">Couldn’t play this audio.</string>
     <string name="cancel_draft">Cancel draft</string>
     <string name="backend_settings">Backend settings</string>
     <string name="copy_logs">Copy logs</string>

@@ -7,7 +7,8 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/drawerLayout"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -152,6 +153,40 @@
                             android:inputType="textMultiLine"
                             android:scrollbars="vertical" />
                     </com.google.android.material.textfield.TextInputLayout>
+
+                    <!-- Audio player: hear the song while fixing the
+                         lyrics. Shown once the audio file is ready. -->
+                    <LinearLayout
+                        android:id="@+id/audioPlayer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:visibility="gone">
+
+                        <Button
+                            android:id="@+id/playerPlayButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/player_play"
+                            style="?attr/materialButtonOutlinedStyle" />
+
+                        <SeekBar
+                            android:id="@+id/playerSeekBar"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="8dp" />
+
+                        <TextView
+                            android:id="@+id/playerTimeLabel"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:text="0:00 / 0:00"
+                            android:textAppearance="?attr/textAppearanceBodyMedium" />
+                    </LinearLayout>
 
                     <!-- No checkbox: leaving lyrics empty means "transcribe" automatically. -->
 
@@ -380,6 +415,7 @@
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
         android:layout_gravity="start"
+        android:fitsSystemWindows="true"
         app:headerLayout="@layout/nav_header"
         app:menu="@menu/drawer_menu" />
 

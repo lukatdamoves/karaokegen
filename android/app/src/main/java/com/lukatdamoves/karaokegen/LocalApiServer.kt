@@ -189,7 +189,25 @@ object LocalApiServer : NanoHTTPD("127.0.0.1", 0) {
             seed.append("localStorage.setItem('kg_file_name',")
                 .append(JSONObject.quote(fileName)).append(");")
         }
-        val inject = "<style>#waveform,#waveform *{touch-action:none}</style>" +
+        // Desktop chrome is hidden: the app has its own Jobs list (the
+        // sidebar) and its own Backend settings, and James wants the
+        // homepage navy look, not the desktop page — so the editor's
+        // Jobs sidebar and its header (KaraokeGen / gear / ? / Stop
+        // Modal) never show, and .main takes the full width so hiding
+        // the sidebar leaves no gap. When a draft is loaded (?draft=),
+        // the draft form is hidden too, so the page opens straight on
+        // the waveform + word editor + render. With no draft loaded
+        // the form stays (the editor still needs it to start a draft
+        // standalone). The desktop files themselves are untouched —
+        // this CSS is only injected here.
+        val chromeCss = "#waveform,#waveform *{touch-action:none}" +
+            ".sidebar{display:none!important}" +
+            "header{display:none!important}" +
+            ".layout{display:block!important}" +
+            ".main{width:100%!important;max-width:none!important}" +
+            "body{background:#14142a!important;color:#e8e8f0!important}" +
+            if (draftId.isNotEmpty()) "#step-draft{display:none!important}" else ""
+        val inject = "<style>" + chromeCss + "</style>" +
             "<script>try{" + seed.toString() + "}catch(e){}</script>"
         out = out.replace("</head>", inject + "</head>")
         return newFixedLengthResponse(Response.Status.OK, "text/html", out)

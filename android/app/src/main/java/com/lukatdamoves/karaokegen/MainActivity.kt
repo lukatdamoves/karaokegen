@@ -6,9 +6,11 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Typeface
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -20,6 +22,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.LinearLayout
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
@@ -76,6 +79,12 @@ class MainActivity : AppCompatActivity() {
     private var lastDraftJobId = ""
     private var lastCallId = ""
     private var lastSongTitle = ""
+
+    // Audio player (listen while fixing the lyrics).
+    private var mediaPlayer: MediaPlayer? = null
+    private var playerFile: File? = null
+    private var playerTicker: Job? = null
+    private var playerSeeking = false
 
     private val fileChooserLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -158,6 +167,29 @@ class MainActivity : AppCompatActivity() {
         binding.startButton.setOnClickListener { onStartTapped() }
         binding.cancelButton.setOnClickListener { onCancel() }
         binding.editorBackButton.setOnClickListener { showHome() }
+        binding.playerPlayButton.setOnClickListener { onPlayerPlayPause() }
+        binding.playerSeekBar.setOnSeekBarChangeListener(
+            object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(
+                    seekBar: SeekBar?, progress: Int, fromUser: Boolean
+                ) {
+                    if (!fromUser) return
+                    mediaPlayer?.seekTo(progress)
+                    val dur = mediaPlayer?.duration ?: 0
+                    binding.playerTimeLabel.text =
+                        "${formatDuration((progress / 1000).toLong())} / " +
+                        formatDuration((dur / 1000).toLong())
+                }
+
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {
+                    playerSeeking = true
+                }
+
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                    playerSeeking = false
+                }
+            }
+        )
         binding.updateButton.setOnClickListener { onUpdateTapped() }
         binding.updateLaterButton.setOnClickListener {
             binding.updateCard.visibility = View.GONE
@@ -192,6 +224,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         flowJob?.cancel()
+        releasePlayer()
         fileChooserCallback?.onReceiveValue(null)
         fileChooserCallback = null
         if (isFinishing && webViewSetupDone) {
@@ -250,8 +283,11 @@ class MainActivity : AppCompatActivity() {
         binding.homeView.visibility = View.GONE
         binding.jobsView.visibility = View.GONE
         binding.editorView.visibility = View.VISIBLE
+        // Cap the title: a long YouTube title ran under the status-bar
+        // icons. ~40 chars with an ellipsis.
+        val title = songTitle.ifEmpty { getString(R.string.nav_editor) }
         binding.toolbar.title =
-            songTitle.ifEmpty { getString(R.string.nav_editor) }
+            if (title.length > 40) title.take(37) + "…" else title
         binding.navView.setCheckedItem(R.id.nav_editor)
         lastDraftJobId = draftJobId
         lastCallId = callId
@@ -388,7 +424,15 @@ class MainActivity : AppCompatActivity() {
                 setPadding(pad, pad, pad, pad)
                 isClickable = true
                 isFocusable = true
-                setBackgroundResource(android.R.attr.selectableItemBackground)
+                // selectableItemBackground is a THEME ATTRIBUTE, not a
+                // drawable — passing android.R.attr.* straight to
+                // setBackgroundResource crashes with
+                // Resources$NotFoundException. Resolve it first.
+                val outValue = TypedValue()
+                theme.resolveAttribute(
+                    android.R.attr.selectableItemBackground, outValue, true
+                )
+                setBackgroundResource(outValue.resourceId)
                 setOnClickListener {
                     showEditor(job.draftJobId, job.callId, job.title)
                 }
@@ -413,6 +457,110 @@ class MainActivity : AppCompatActivity() {
         "done" -> "Done"
         "error" -> "Failed"
         else -> "Running…"
+    }
+
+    // ------------------------------------------------------------------
+    // Audio player: listen to the downloaded song while fixing the
+    // lyrics in the box. Plain MediaPlayer on the file on disk
+    // (app-private, so no permission needed). Any failure hides the
+    // player instead of crashing.
+    // ------------------------------------------------------------------
+
+    /** Set the player up for the downloaded audio file (called once
+     *  the file is ready — both the fresh-download and the reuse
+     *  path). Replaces any previous song's player. */
+    private fun setupAudioPlayer(file: File) {
+        releasePlayer()
+        playerFile = file
+        binding.audioPlayer.visibility = View.VISIBLE
+        binding.playerPlayButton.isEnabled = false
+        binding.playerPlayButton.text = getString(R.string.player_play)
+        binding.playerSeekBar.progress = 0
+        binding.playerSeekBar.max = 0
+        binding.playerTimeLabel.text = getString(R.string.player_loading)
+        lifecycleScope.launch(Dispatchers.IO) {
+            val mp = MediaPlayer()
+            try {
+                mp.setDataSource(file.path)
+                mp.prepare()
+            } catch (e: Exception) {
+                AppLog.e("Main", "Player failed for ${file.name}: ${e.message}")
+                runCatching { mp.release() }
+                withContext(Dispatchers.Main) {
+                    if (playerFile == file) {
+                        binding.audioPlayer.visibility = View.GONE
+                        Toast.makeText(
+                            this@MainActivity, R.string.player_error,
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+                return@launch
+            }
+            withContext(Dispatchers.Main) {
+                // A newer song may have replaced this one while it
+                // was preparing — don't install a stale player.
+                if (playerFile != file) {
+                    runCatching { mp.release() }
+                    return@withContext
+                }
+                mediaPlayer = mp
+                val dur = mp.duration
+                binding.playerSeekBar.max = dur
+                binding.playerTimeLabel.text =
+                    "${formatDuration(0)} / ${formatDuration((dur / 1000).toLong())}"
+                binding.playerPlayButton.isEnabled = true
+                mp.setOnCompletionListener {
+                    binding.playerSeekBar.progress = 0
+                    binding.playerTimeLabel.text =
+                        "${formatDuration(0)} / ${formatDuration((dur / 1000).toLong())}"
+                    binding.playerPlayButton.text = getString(R.string.player_play)
+                    stopPlayerTicker()
+                }
+            }
+        }
+    }
+
+    private fun onPlayerPlayPause() {
+        val mp = mediaPlayer ?: return
+        if (mp.isPlaying) {
+            mp.pause()
+            binding.playerPlayButton.text = getString(R.string.player_play)
+            stopPlayerTicker()
+        } else {
+            mp.start()
+            binding.playerPlayButton.text = getString(R.string.player_pause)
+            startPlayerTicker()
+        }
+    }
+
+    private fun startPlayerTicker() {
+        stopPlayerTicker()
+        playerTicker = lifecycleScope.launch {
+            while (true) {
+                delay(500)
+                val mp = mediaPlayer ?: break
+                if (!mp.isPlaying) break
+                if (!playerSeeking) {
+                    binding.playerSeekBar.progress = mp.currentPosition
+                    binding.playerTimeLabel.text =
+                        "${formatDuration((mp.currentPosition / 1000).toLong())} / " +
+                        formatDuration((mp.duration / 1000).toLong())
+                }
+            }
+        }
+    }
+
+    private fun stopPlayerTicker() {
+        playerTicker?.cancel()
+        playerTicker = null
+    }
+
+    private fun releasePlayer() {
+        stopPlayerTicker()
+        playerFile = null
+        mediaPlayer?.let { runCatching { it.release() } }
+        mediaPlayer = null
     }
 
     // ------------------------------------------------------------------
@@ -630,6 +778,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 binding.audioResult.text = info
                 binding.audioResult.visibility = View.VISIBLE
+                // The audio file is ready (fresh download or reused) —
+                // set the player up so the song can be heard while the
+                // lyrics are fixed.
+                setupAudioPlayer(sendFile)
 
                 // Step 2: send it to the backend (draft or transcribe).
                 binding.draftProgress.visibility = View.VISIBLE

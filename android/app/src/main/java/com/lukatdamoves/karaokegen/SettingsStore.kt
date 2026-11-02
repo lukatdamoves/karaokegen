@@ -12,27 +12,46 @@ object SettingsStore {
     private const val KEY_URL = "modal_url"
     private const val KEY_API = "modal_key"
     private const val KEY_SETUP_JOB = "setup_job_id"
-    private const val KEY_BV_LAST = "bv_mode_last"
-    private const val KEY_BV_PREFIX = "bv_mode_"
+    private const val KEY_SV_ENABLED_LAST = "sv_enabled_last"
+    private const val KEY_SV_ENABLED_PREFIX = "sv_enabled_"
+    private const val KEY_SV_VOLUME_LAST = "sv_volume_last"
+    private const val KEY_SV_VOLUME_PREFIX = "sv_volume_"
 
-    /** Backing-vocals render choice: 0 = Vocals, 1 = Backing vocals,
-     *  2 = Vocals + backing vocals. Stored per draft id so going
+    /** "2nd voice" (backing vocals) for the render, matching the
+     *  desktop editor: a checkbox (checked by default) + a volume
+     *  slider 0-200 (default 100). Stored per draft id so going
      *  back to a job restores its choice, and the last choice is
-     *  remembered as the default for a new draft. */
-    fun getBvMode(context: Context, draftId: String): Int {
+     *  remembered as the default for a new draft. The render sends
+     *  second_voice = enabled and second_voice_gain = volume / 100,
+     *  exactly like the desktop's svVolumeGain(). */
+    fun getSvEnabled(context: Context, draftId: String): Boolean {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (draftId.isNotEmpty()) {
-            val perDraft = prefs.getInt(KEY_BV_PREFIX + draftId, -1)
-            if (perDraft in 0..2) return perDraft
+        if (draftId.isNotEmpty() && prefs.contains(KEY_SV_ENABLED_PREFIX + draftId)) {
+            return prefs.getBoolean(KEY_SV_ENABLED_PREFIX + draftId, true)
         }
-        return prefs.getInt(KEY_BV_LAST, 0).coerceIn(0, 2)
+        return prefs.getBoolean(KEY_SV_ENABLED_LAST, true)
     }
 
-    fun saveBvMode(context: Context, draftId: String, mode: Int) {
-        val m = mode.coerceIn(0, 2)
+    fun saveSvEnabled(context: Context, draftId: String, enabled: Boolean) {
         val edit = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putInt(KEY_BV_LAST, m)
-        if (draftId.isNotEmpty()) edit.putInt(KEY_BV_PREFIX + draftId, m)
+            .edit().putBoolean(KEY_SV_ENABLED_LAST, enabled)
+        if (draftId.isNotEmpty()) edit.putBoolean(KEY_SV_ENABLED_PREFIX + draftId, enabled)
+        edit.apply()
+    }
+
+    fun getSvVolume(context: Context, draftId: String): Int {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (draftId.isNotEmpty() && prefs.contains(KEY_SV_VOLUME_PREFIX + draftId)) {
+            return prefs.getInt(KEY_SV_VOLUME_PREFIX + draftId, 100).coerceIn(0, 200)
+        }
+        return prefs.getInt(KEY_SV_VOLUME_LAST, 100).coerceIn(0, 200)
+    }
+
+    fun saveSvVolume(context: Context, draftId: String, volume: Int) {
+        val v = volume.coerceIn(0, 200)
+        val edit = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putInt(KEY_SV_VOLUME_LAST, v)
+        if (draftId.isNotEmpty()) edit.putInt(KEY_SV_VOLUME_PREFIX + draftId, v)
         edit.apply()
     }
 

@@ -15,8 +15,6 @@ import android.util.TypedValue
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.SeekBar
@@ -100,18 +98,19 @@ class MainActivity : AppCompatActivity() {
     // Render background colour (the swatches below the word list).
     // Black by default, matching the desktop.
     private var editorBgColor: String = "#000000"
-    // Backing-vocals render choice (the dropdown under Prev/Play/
-    // Next): 0 = Vocals, 1 = Backing vocals, 2 = Vocals + backing
-    // vocals. Stored per draft (SettingsStore) so going back to a
-    // job restores its choice; a new draft starts from the last
-    // choice instead of silently resetting to Vocals.
-    private var editorBvMode: Int = 0
-    // True once the BV spinner's listener is live. Set false while
-    // a selection is applied programmatically (restore on draft
-    // load) so it does not re-save the same value / clobber the
-    // per-draft restore. The Spinner fires onItemSelected once when
-    // its adapter is first set, before the listener is attached.
-    private var bvSpinnerReady: Boolean = false
+    // "2nd voice" (backing vocals) for the render, matching the
+    // desktop editor: a checkbox (checked by default) + a volume
+    // slider 0-200 (default 100). Stored per draft (SettingsStore)
+    // so going back to a job restores its choice; a new draft
+    // starts from the last choice instead of silently resetting.
+    // The render sends second_voice = enabled and
+    // second_voice_gain = volume / 100, exactly like the desktop's
+    // svVolumeGain(). svRestoring is true while a draft load applies
+    // the saved values programmatically, so the listeners do not
+    // re-save the same values / clobber the per-draft restore.
+    private var editorSvEnabled: Boolean = true
+    private var editorSvVolume: Int = 100
+    private var svRestoring: Boolean = false
     // Guards against a slow load overwriting a newer one: each
     // loadNativeEditor bumps this, and a load that finds the number
     // changed after an await stops instead of clobbering the editor
@@ -346,14 +345,18 @@ class MainActivity : AppCompatActivity() {
         editorDraftJobId = draftJobId
         editorSongTitle = songTitle
         loadedEditorDraft = draftJobId
-        // Restore this draft's BV render choice (or the last choice
-        // for a new draft) and show it in the dropdown. The
-        // suppress-flag stops the programmatic selection from
-        // re-saving over the per-draft value.
-        editorBvMode = SettingsStore.getBvMode(this, draftJobId)
-        bvSpinnerReady = false
-        binding.editorBvSpinner.setSelection(editorBvMode)
-        bvSpinnerReady = true
+        // Restore this draft's "2nd voice" choice + volume (or the
+        // last choice for a new draft) and show them in the
+        // checkbox + slider. The suppress-flag stops the
+        // programmatic change from re-saving over the per-draft
+        // value; the slider is greyed out when the box is off.
+        editorSvEnabled = SettingsStore.getSvEnabled(this, draftJobId)
+        editorSvVolume = SettingsStore.getSvVolume(this, draftJobId)
+        svRestoring = true
+        binding.editorSvToggle.isChecked = editorSvEnabled
+        binding.editorSvVolume.progress = editorSvVolume
+        binding.editorSvVolume.isEnabled = editorSvEnabled
+        svRestoring = false
         val seq = ++editorLoadSeq
         binding.editorSongTitle.text = songTitle
         binding.editorStatus.visibility = View.GONE
@@ -750,38 +753,43 @@ class MainActivity : AppCompatActivity() {
         binding.editorPlayButton.setOnClickListener { onEditorPlayPause() }
         binding.editorPrevButton.setOnClickListener { editorJumpLine(-1) }
         binding.editorNextButton.setOnClickListener { editorJumpLine(1) }
-        // Backing vocals for the render (the dropdown under the
-        // playback buttons). Selection first, listener second — the
-        // Spinner fires onItemSelected once when the adapter is set,
-        // and that must not save anything. Starts from the last
-        // choice; a draft load restores that draft's own choice
-        // (see loadNativeEditor).
-        editorBvMode = SettingsStore.getBvMode(this, "")
-        val bvAdapter = ArrayAdapter.createFromResource(
-            this, R.array.editor_bv_options,
-            android.R.layout.simple_spinner_item
-        ).apply {
-            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        // "2nd voice" (backing vocals) for the render, matching the
+        // desktop editor: a checkbox (checked by default) + a
+        // volume slider 0-200 (default 100), in the row under the
+        // playback buttons. Starts from the last choice; a draft
+        // load restores that draft's own choice (see
+        // loadNativeEditor). The slider is greyed out while the
+        // box is off.
+        editorSvEnabled = SettingsStore.getSvEnabled(this, "")
+        editorSvVolume = SettingsStore.getSvVolume(this, "")
+        binding.editorSvToggle.isChecked = editorSvEnabled
+        binding.editorSvVolume.progress = editorSvVolume
+        binding.editorSvVolume.isEnabled = editorSvEnabled
+        binding.editorSvToggle.setOnCheckedChangeListener { _, isChecked ->
+            if (svRestoring) return@setOnCheckedChangeListener
+            editorSvEnabled = isChecked
+            binding.editorSvVolume.isEnabled = isChecked
+            SettingsStore.saveSvEnabled(
+                this@MainActivity, editorDraftJobId, editorSvEnabled
+            )
+            AppLog.d("Editor", "2nd voice (BV) enabled = $editorSvEnabled")
         }
-        binding.editorBvSpinner.adapter = bvAdapter
-        binding.editorBvSpinner.setSelection(editorBvMode)
-        bvSpinnerReady = true
-        binding.editorBvSpinner.onItemSelectedListener =
-            object : AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(
-                    parent: AdapterView<*>?, view: View?,
-                    position: Int, id: Long
+        binding.editorSvVolume.setOnSeekBarChangeListener(
+            object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(
+                    seekBar: SeekBar?, progress: Int, fromUser: Boolean
                 ) {
-                    if (!bvSpinnerReady) return
-                    editorBvMode = position.coerceIn(0, 2)
-                    SettingsStore.saveBvMode(
-                        this@MainActivity, editorDraftJobId, editorBvMode
+                    if (!fromUser || svRestoring) return
+                    editorSvVolume = progress.coerceIn(0, 200)
+                    SettingsStore.saveSvVolume(
+                        this@MainActivity, editorDraftJobId, editorSvVolume
                     )
-                    AppLog.d("Editor", "BV render mode = $editorBvMode")
                 }
 
-                override fun onNothingSelected(parent: AdapterView<*>?) {}
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
             }
+        )
         binding.editorAddLineButton.setOnClickListener { addEditorLine() }
         binding.editorUndoButton.setOnClickListener { undoEditorEdit() }
         binding.editorRenderButton.setOnClickListener { onRenderTapped() }
@@ -1208,19 +1216,16 @@ class MainActivity : AppCompatActivity() {
         // background colour, output name. /render-word forces
         // word_level=true + highlight=word server-side.
         //
-        // Backing vocals (RenderRequest.second_voice, gain 1.0 —
-        // the desktop's "2nd voice" checkbox): the render bed is
+        // "2nd voice" (backing vocals), exactly like the desktop
+        // editor's startRender(): second_voice = the checkbox, and
+        // second_voice_gain = the volume slider / 100 — the
+        // desktop's svVolumeGain() is (parseFloat(value) || 100)
+        // / 100, slider 0-200, default 100. The render bed is
         // ALWAYS the instrumental; second_voice=true mixes the
         // backing-vocals stem (backing_vocals.wav, written by the
-        // draft's 3-stem pass) into it. So:
-        //   0 "Vocals" = instrumental only (today's render).
-        //   1 "Backing vocals" = BV mixed in (same audio as 2 —
-        //     the backend has NO BV-only mode, the instrumental is
-        //     always the base; a true BV-only render needs a
-        //     backend change).
-        //   2 "Vocals + backing vocals" = instrumental + BV.
-        // The /backing-vocals streaming endpoint is NOT needed here
-        // — the render reads the same stem file server-side, so an
+        // draft's 3-stem pass) into it at that gain. The
+        // /backing-vocals streaming endpoint is NOT needed here —
+        // the render reads the same stem file server-side, so an
         // old 500 on that endpoint does not block the BV mix.
         val body = JSONObject().apply {
             put("draft_job_id", editorDraftJobId)
@@ -1228,10 +1233,10 @@ class MainActivity : AppCompatActivity() {
             put("final_lyrics", alignment.finalLyrics())
             put("bg_color", selectedBgColor())
             put("output_name", outputName)
-            put("second_voice", editorBvMode != 0)
-            put("second_voice_gain", 1.0)
+            put("second_voice", editorSvEnabled)
+            put("second_voice_gain", editorSvVolume / 100.0)
         }
-        AppLog.d("Editor", "Render submitted with BV mode $editorBvMode (second_voice=${editorBvMode != 0})")
+        AppLog.d("Editor", "Render submitted with 2nd voice=$editorSvEnabled gain=${editorSvVolume / 100.0}")
         binding.editorRenderButton.isEnabled = false
         binding.editorDownloadButton.visibility = View.GONE
         editorRenderFileId = null

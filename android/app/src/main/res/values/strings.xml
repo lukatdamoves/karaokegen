@@ -42,16 +42,12 @@
     <!-- One line on a phone screen (47 chars, 12sp — see the layout):
          tap to play, DOUBLE-TAP to edit, drag to move/resize. -->
     <string name="editor_words_hint">Tap to play · double-tap to edit · drag to move</string>
-    <!-- Backing-vocals choice for the render (Spinner beside the
-         playback buttons). See MainActivity for the backend mapping:
-         the render bed is always the instrumental; second_voice only
-         mixes the BV stem in. -->
-    <string name="editor_bv_label">Audio:</string>
-    <string-array name="editor_bv_options">
-        <item>Vocals</item>
-        <item>Backing vocals</item>
-        <item>Vocals + backing vocals</item>
-    </string-array>
+    <!-- "2nd voice" (backing vocals) for the render, matching the
+         desktop editor: a checkbox (checked by default) + a volume
+         slider 0-200 (default 100). The render sends
+         second_voice = checked and second_voice_gain = slider / 100. -->
+    <string name="editor_sv_label">2nd voice</string>
+    <string name="editor_sv_volume_label">2nd vol</string>
     <string name="editor_add_line">+ Add line</string>
     <string name="editor_undo">↩ Undo</string>
     <string name="editor_render_title">Render karaoke MP4</string>

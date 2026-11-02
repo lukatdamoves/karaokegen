@@ -85,6 +85,14 @@ object EditorCache {
         return if (file.exists() && file.length() > 0) file else null
     }
 
+    /** Delete a draft's cached files (draft JSON + vocals WAV). Used
+     *  when a job is deleted, so it leaves no orphaned cache behind.
+     *  Safe to call when the files do not exist. */
+    fun delete(context: Context, draftId: String) {
+        runCatching { draftFile(context, draftId).delete() }
+        runCatching { vocalsFile(context, draftId).delete() }
+    }
+
     /** Stream the vocals download into the cache (temp file + rename,
      *  so a half-finished download never counts as cached). Returns
      *  the file on success, null on failure. */

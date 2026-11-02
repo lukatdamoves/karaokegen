@@ -11,12 +11,12 @@ android {
         applicationId = "com.lukatdamoves.karaokegen"
         minSdk = 26
         targetSdk = 35
-        versionCode = 29
-        // v0.3.2: one-line words hint, waveform pan + resize, faster
-        // job loading via a local editor cache. Bump versionCode on
-        // EVERY release — the in-app updater compares it against the
-        // APK asset on GitHub Releases.
-        versionName = "0.3.2-trial"
+        versionCode = 30
+        // v0.3.3: delete button on each job row (clears its cached
+        // draft + vocals). Bump versionCode on EVERY release — the
+        // in-app updater compares it against the APK asset on GitHub
+        // Releases.
+        versionName = "0.3.3-trial"
     }
 
     // Release signing comes from CI-injected properties (see android/README.md).

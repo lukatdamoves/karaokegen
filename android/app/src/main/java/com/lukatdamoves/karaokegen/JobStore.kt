@@ -46,6 +46,23 @@ object JobStore {
         }
     }
 
+    /** Delete exactly one entry. The call id is unique per submit — a
+     *  re-run of the same song shares the draft id but gets a new call
+     *  id — so this removes only the tapped row, never a sibling. */
+    fun remove(context: Context, callId: String) {
+        val jobs = getAll(context).toMutableList()
+        val idx = jobs.indexOfFirst { it.callId == callId }
+        if (idx >= 0) {
+            jobs.removeAt(idx)
+            save(context, jobs)
+        }
+    }
+
+    /** True when some remaining job still uses this draft id (a re-run
+     *  of the same song) — its cached editor data must be kept. */
+    fun hasDraft(context: Context, draftJobId: String): Boolean =
+        getAll(context).any { it.draftJobId == draftJobId }
+
     /** Newest first. */
     fun getAll(context: Context): List<JobEntry> {
         val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

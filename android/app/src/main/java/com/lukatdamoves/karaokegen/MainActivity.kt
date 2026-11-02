@@ -1249,10 +1249,11 @@ class MainActivity : AppCompatActivity() {
         if (jobs.isEmpty()) return
         val density = resources.displayMetrics.density
         val pad = (12 * density).toInt()
+        val xMin = (56 * density).toInt()
         val dateFmt = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
         for (job in jobs) {
             val row = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
+                orientation = LinearLayout.HORIZONTAL
                 setPadding(pad, pad, pad, pad)
                 isClickable = true
                 isFocusable = true
@@ -1273,6 +1274,12 @@ class MainActivity : AppCompatActivity() {
                     showEditor(job.draftJobId, job.title)
                 }
             }
+            val textCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+                )
+            }
             val titleView = TextView(this).apply {
                 text = job.title
                 textSize = 16f
@@ -1283,10 +1290,40 @@ class MainActivity : AppCompatActivity() {
                 textSize = 13f
                 setTextColor(getColor(R.color.kg_muted))
             }
-            row.addView(titleView)
-            row.addView(metaView)
+            textCol.addView(titleView)
+            textCol.addView(metaView)
+            row.addView(textCol)
+            // Delete X — same look as the editor's per-line X (red ✕,
+            // 56dp touch target). It has its own click listener, so
+            // tapping it never opens the job underneath.
+            val del = TextView(this).apply {
+                text = "✕"
+                textSize = 18f
+                minHeight = xMin
+                minWidth = xMin
+                gravity = android.view.Gravity.CENTER
+                setPadding(pad, pad, pad, pad)
+                setTextColor(getColor(R.color.kg_error))
+                setOnClickListener { deleteJob(job) }
+            }
+            row.addView(del)
             binding.jobsList.addView(row)
         }
+    }
+
+    /** Delete one job row (the X on the row): remove it from the
+     *  store and refresh the list right away so the row disappears.
+     *  No confirmation — same as the editor's per-line X. Its cached
+     *  editor data (draft JSON + vocals WAV) is dropped too, unless
+     *  another job still uses that draft id (a re-run of the same
+     *  song). The editor itself is left alone even if the deleted
+     *  job is the one open in it. */
+    private fun deleteJob(job: JobStore.JobEntry) {
+        JobStore.remove(this, job.callId)
+        if (!JobStore.hasDraft(this, job.draftJobId)) {
+            EditorCache.delete(this, job.draftJobId)
+        }
+        rebuildJobsList()
     }
 
     private fun jobStatusLabel(status: String): String = when (status) {

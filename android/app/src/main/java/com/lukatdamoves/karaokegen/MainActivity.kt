@@ -417,6 +417,18 @@ class MainActivity : AppCompatActivity() {
                 "Editor",
                 "Loaded draft $draftJobId: ${alignment.lines.size} lines"
             )
+            // The vocals are fetched below (cache / parallel / fresh).
+            // While they are in flight the status says so — the
+            // waveform area itself never shows text (the regions fill
+            // it, so canvas text always overlapped the word labels).
+            // On a vocals cache hit there is nothing to wait for, so
+            // no status is shown.
+            if (vocalsFile == null) {
+                binding.editorStatus.text =
+                    getString(R.string.editor_vocals_downloading)
+                binding.editorStatus.visibility = View.VISIBLE
+                binding.editorStatus.setOnClickListener(null)
+            }
             // 3. The vocals WAV: the cached file, the parallel
             // download already running, or a fresh download now.
             val vocals = vocalsFile
@@ -426,26 +438,18 @@ class MainActivity : AppCompatActivity() {
                         ?: downloadVocalsWavWithRetry(baseUrl, apiKey, draftJobId)
                 }
             if (seq != editorLoadSeq) return@launch
-            // Fall back to the original downloaded song when the
-            // vocals can't be fetched — the waveform still shows.
-            val audioFile = vocals
-                ?: cachedSendFile?.takeIf { it.exists() }
-            if (audioFile != null) {
-                val decoded = withContext(Dispatchers.IO) {
-                    AudioDecode.decode(audioFile)
-                }
-                if (seq != editorLoadSeq) return@launch
-                editorPeaks = decoded?.let {
-                    AudioDecode.computePeaks(it.samples, 1500)
-                }
-                setupEditorPlayer(audioFile)
-                syncWaveform()
-            }
-            if (vocals != null) {
-                // The real vocals are in — clear any retry prompt.
+            val vocalsOk = installVocalsAudio(vocals, seq)
+            if (seq != editorLoadSeq) return@launch
+            if (vocalsOk) {
+                // The real vocals are in and drawn — clear any prompt.
                 binding.editorWaveform.onEmptyTap = null
                 binding.editorStatus.visibility = View.GONE
                 binding.editorStatus.setOnClickListener(null)
+            } else if (vocals != null) {
+                // Downloaded but unreadable (decode failed): the
+                // waveform may still show from the original song.
+                // Retry re-downloads from scratch.
+                showVocalsUnreadable()
             } else {
                 // The vocals download failed (after retries): the
                 // timings are still editable, and the user can tap
@@ -493,12 +497,75 @@ class MainActivity : AppCompatActivity() {
         return null
     }
 
+    /**
+     * Decode the vocals WAV for the waveform + playback, and install
+     * it. Returns true only when the VOCALS themselves decoded (the
+     * happy path). Returns false when they are missing or unreadable.
+     *
+     * Why this exists (traced from James's vc29 screenshot): the old
+     * code treated "vocals file downloaded" as "waveform ready" — but
+     * if AudioDecode.decode() returned null (an unsupported WAV
+     * variant, a corrupt/partial file), editorPeaks stayed null while
+     * the `vocals != null` branch hid the status and cleared the
+     * retry. The editor then showed an empty waveform with NO status
+     * and NO way to retry — exactly the 12:32 screenshot (canvas
+     * "No waveform — timings still editable", 0:00/0:00). The
+     * download-fail and decode-fail cases were indistinguishable.
+     *
+     * Now they are separate: a decode failure is logged distinctly
+     * ("Vocals decode failed"), the original downloaded song is
+     * tried for the waveform instead, and the caller shows the
+     * "couldn't be read — tap to retry" prompt. A stale load (seq
+     * changed while decoding) installs nothing.
+     */
+    private suspend fun installVocalsAudio(vocals: File?, seq: Int): Boolean {
+        var audioFile = vocals
+        var decoded = audioFile?.let {
+            withContext(Dispatchers.IO) { AudioDecode.decode(it) }
+        }
+        if (seq != editorLoadSeq) return false
+        if (decoded == null && audioFile != null) {
+            AppLog.e(
+                "Editor",
+                "Vocals decode failed for draft $editorDraftJobId " +
+                "(${audioFile.length()} bytes) — file downloaded but unreadable"
+            )
+        }
+        if (decoded == null) {
+            // Fall back to the original downloaded song when the
+            // vocals can't be decoded — the waveform still shows.
+            audioFile = cachedSendFile?.takeIf { it.exists() }
+            decoded = audioFile?.let {
+                withContext(Dispatchers.IO) { AudioDecode.decode(it) }
+            }
+            if (seq != editorLoadSeq) return false
+        }
+        if (audioFile != null && decoded != null) {
+            editorPeaks = AudioDecode.computePeaks(decoded.samples, 1500)
+            setupEditorPlayer(audioFile)
+            syncWaveform()
+        }
+        return vocals != null && decoded != null && audioFile == vocals
+    }
+
     /** The vocals WAV could not be fetched (after retries): the
      *  timings are still editable, and the user can tap the status
      *  line — or the empty waveform itself — to retry without
      *  leaving the editor. */
     private fun showVocalsUnavailable() {
         binding.editorStatus.text = "Vocals audio couldn't be downloaded — tap to retry."
+        binding.editorStatus.visibility = View.VISIBLE
+        binding.editorStatus.setOnClickListener { retryVocalsDownload() }
+        binding.editorWaveform.onEmptyTap = { retryVocalsDownload() }
+        binding.editorWaveform.invalidate()
+    }
+
+    /** The vocals WAV downloaded but could not be decoded (an
+     *  unsupported WAV variant or a corrupt file): the timings are
+     *  still editable, and tapping retries with a fresh download.
+     *  The waveform may still show from the original song. */
+    private fun showVocalsUnreadable() {
+        binding.editorStatus.text = getString(R.string.editor_vocals_unreadable)
         binding.editorStatus.visibility = View.VISIBLE
         binding.editorStatus.setOnClickListener { retryVocalsDownload() }
         binding.editorWaveform.onEmptyTap = { retryVocalsDownload() }
@@ -512,28 +579,31 @@ class MainActivity : AppCompatActivity() {
         if (draftId.isEmpty() || !SettingsStore.isConfigured(this)) return
         val baseUrl = SettingsStore.getBaseUrl(this)
         val apiKey = SettingsStore.getApiKey(this)
+        val seq = editorLoadSeq
         binding.editorStatus.text = "Retrying vocals download…"
         binding.editorStatus.setOnClickListener(null)
         binding.editorWaveform.onEmptyTap = null
         lifecycleScope.launch {
+            // A retry must re-download, not hand back the same cached
+            // file that failed to decode last time.
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    EditorCache.vocalsFile(this@MainActivity, draftId).delete()
+                }
+            }
             val vocals = withContext(Dispatchers.IO) {
                 downloadVocalsWavWithRetry(baseUrl, apiKey, draftId)
             }
             if (loadedEditorDraft != draftId) return@launch
-            if (vocals != null) {
-                val decoded = withContext(Dispatchers.IO) {
-                    AudioDecode.decode(vocals)
-                }
-                if (loadedEditorDraft != draftId) return@launch
-                editorPeaks = decoded?.let {
-                    AudioDecode.computePeaks(it.samples, 1500)
-                }
-                setupEditorPlayer(vocals)
-                syncWaveform()
+            val vocalsOk = installVocalsAudio(vocals, seq)
+            if (loadedEditorDraft != draftId) return@launch
+            if (vocalsOk) {
                 binding.editorWaveform.onEmptyTap = null
                 binding.editorStatus.visibility = View.GONE
                 binding.editorStatus.setOnClickListener(null)
                 AppLog.d("Editor", "Vocals retry worked for draft $draftId")
+            } else if (vocals != null) {
+                showVocalsUnreadable()
             } else {
                 showVocalsUnavailable()
             }
@@ -635,9 +705,10 @@ class MainActivity : AppCompatActivity() {
                     val alignment = editorAlignment ?: return
                     val duration = alignment.duration
                     if (duration <= 0) return
-                    // progress 0 = whole song; 100 = a 10s window (or
-                    // the whole song when it is shorter than that).
-                    val minWindow = minOf(10.0, duration)
+                    // progress 0 = whole song; 100 = a 2.5s window (or
+                    // the whole song when it is shorter than that) —
+                    // deep enough to fine-tune a single word's timing.
+                    val minWindow = minOf(2.5, duration)
                     val window = duration - (duration - minWindow) * progress / 100.0
                     val centre = editorPlayheadSec().let {
                         if (it >= 0) it else editorWindowStart + editorWindowDuration / 2
@@ -714,10 +785,12 @@ class MainActivity : AppCompatActivity() {
         editorChipViews.clear()
         if (alignment == null) return
         val density = resources.displayMetrics.density
-        // Chips are at least 56dp tall so they are easy to tap.
-        val chipPadH = (12 * density).toInt()
-        val chipPadV = (14 * density).toInt()
-        val chipMinH = (56 * density).toInt()
+        // Chips are compact (~30% smaller than v0.3.2's 56dp): 40dp
+        // tall with 8dp/10dp padding, so more words fit and they look
+        // less bulky. The word list container itself is unchanged.
+        val chipPadH = (8 * density).toInt()
+        val chipPadV = (10 * density).toInt()
+        val chipMinH = (40 * density).toInt()
         for ((li, line) in alignment.lines.withIndex()) {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -732,7 +805,7 @@ class MainActivity : AppCompatActivity() {
                 val ref = WordRef(li, wi)
                 val chip = TextView(this@MainActivity).apply {
                     text = word.text.ifEmpty { "…" }
-                    textSize = 15f
+                    textSize = 13f
                     minHeight = chipMinH
                     gravity = android.view.Gravity.CENTER_VERTICAL
                     setPadding(chipPadH, chipPadV, chipPadH, chipPadV)

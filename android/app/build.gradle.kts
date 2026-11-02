@@ -11,12 +11,12 @@ android {
         applicationId = "com.lukatdamoves.karaokegen"
         minSdk = 26
         targetSdk = 35
-        versionCode = 30
-        // v0.3.3: delete button on each job row (clears its cached
-        // draft + vocals). Bump versionCode on EVERY release — the
-        // in-app updater compares it against the APK asset on GitHub
-        // Releases.
-        versionName = "0.3.3-trial"
+        versionCode = 31
+        // v0.3.4: no-waveform text out of the canvas, shorter waveform
+        // + deeper zoom, smaller word chips, visible word handles.
+        // Bump versionCode on EVERY release — the in-app updater
+        // compares it against the APK asset on GitHub Releases.
+        versionName = "0.3.4-trial"
     }
 
     // Release signing comes from CI-injected properties (see android/README.md).

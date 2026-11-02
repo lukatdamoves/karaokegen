@@ -53,6 +53,8 @@
     <string name="editor_loading">Loading the editor…</string>
     <string name="editor_no_alignment">Couldn’t load this draft’s timings — try running it again.</string>
     <string name="editor_no_audio">Vocals audio isn’t available — the timings are still editable.</string>
+    <string name="editor_vocals_downloading">Downloading vocals audio…</string>
+    <string name="editor_vocals_unreadable">Vocals audio couldn’t be read — tap to retry.</string>
     <string name="editor_saved">Saved to Downloads: %1$s</string>
     <string name="editor_render_failed">Render failed: %1$s</string>
     <string name="editor_edit_word">Fix this word</string>

@@ -19,11 +19,17 @@ import kotlin.math.min
  * Draws the vocals waveform (per-bucket peaks) on a canvas, with
  * one region block per word over it, and a playhead line. The user
  * can:
- *  - TAP a word region to select it (callback onWordTap).
- *  - DRAG a region's BODY to move the word (start+end shift
- *    together), clamped so it cannot pass its neighbours.
- *  - DRAG a region's LEFT/RIGHT EDGE to resize it, clamped to its
- *    neighbours and to a 0.05s minimum duration.
+ *  - TAP a word region to select it (callback onWordTap). The
+ *    selected word shows HANDLES: bright white bars on its
+ *    left/right edges (drag to resize) and a grip pill on its top
+ *    edge (hold to move the whole word).
+ *  - DRAG a region's BODY (or its top grip) to move the word
+ *    (start+end shift together), clamped so it cannot pass its
+ *    neighbours.
+ *  - DRAG a region's LEFT/RIGHT EDGE (or its side handles) to
+ *    resize it, clamped to its neighbours and to a 0.05s minimum
+ *    duration.
+ *  - DRAG empty waveform space to pan the time window.
  *  - TAP empty waveform to seek the playhead there (onSeekTo).
  *
  * Only the visible time window is drawn ([windowStart,
@@ -31,7 +37,11 @@ import kotlin.math.min
  * and the parent follows the playhead by moving windowStart.
  * When there are no peaks (audio could not be decoded) the view
  * still draws the time ruler + word regions, so the editor stays
- * usable.
+ * usable. The no-audio state itself is shown by the parent's
+ * status line above the waveform, NEVER as text on this canvas —
+ * the regions fill the whole height, so any canvas text overlapped
+ * the word labels (the "No waveform" text kept overlapping them
+ * even after being moved to the top of the canvas).
  */
 class WaveformView @JvmOverloads constructor(
     context: Context,
@@ -132,11 +142,20 @@ class WaveformView @JvmOverloads constructor(
         strokeWidth = 2f * density
         isAntiAlias = true
     }
-    private val hintPaint = Paint().apply {
-        color = Color.parseColor("#8A9AB8")
-        textSize = 13f * density
+    // Selection handles (drawn only on the selected word): bright
+    // white bars on the edges + a grip pill on top, with a blue
+    // line through each so they read as grips, not thick borders.
+    private val handlePaint = Paint().apply {
+        color = Color.WHITE
+        alpha = 235
+        style = Paint.Style.FILL
         isAntiAlias = true
-        textAlign = Paint.Align.CENTER
+    }
+    private val handleGripPaint = Paint().apply {
+        color = Color.parseColor("#4A6CF7")
+        style = Paint.Style.STROKE
+        strokeWidth = 2f * density
+        isAntiAlias = true
     }
 
     private val regionRect = RectF()
@@ -181,6 +200,17 @@ class WaveformView @JvmOverloads constructor(
     fun xToTime(x: Float): Double =
         windowStart + x / width * windowDuration
 
+    /** Geometry of the drawing area: the time ruler sits on top,
+     *  the waveform + word regions below it. Shared by onDraw and
+     *  the hit-test so they can never disagree about where the top
+     *  grip strip is. Returns (rulerH, waveTop, waveBottom). */
+    private fun waveGeometry(): Triple<Float, Float, Float> {
+        val rulerH = 22f * density
+        val waveTop = rulerH + 4f * density
+        val waveBottom = height.toFloat() - 4f * density
+        return Triple(rulerH, waveTop, waveBottom)
+    }
+
     // ------------------------------------------------------------------
     // Drawing
     // ------------------------------------------------------------------
@@ -192,9 +222,7 @@ class WaveformView @JvmOverloads constructor(
         if (w <= 0 || h <= 0) return
         canvas.drawRect(0f, 0f, w, h, bgPaint)
 
-        val rulerH = 22f * density
-        val waveTop = rulerH + 4f * density
-        val waveBottom = h - 4f * density
+        val (rulerH, waveTop, waveBottom) = waveGeometry()
         val waveMid = (waveTop + waveBottom) / 2f
         val waveHalf = (waveBottom - waveTop) / 2f
 
@@ -215,7 +243,11 @@ class WaveformView @JvmOverloads constructor(
         // Ruler baseline.
         canvas.drawLine(0f, rulerH, w, rulerH, tickPaint)
 
-        // Waveform bars (or a hint when there are no peaks).
+        // Waveform bars. With no peaks there is nothing to draw
+        // for the waveform itself — and NO text is drawn here at
+        // all. The no-audio state lives in the parent's status line
+        // above the waveform: the regions fill this whole height,
+        // so any canvas text overlapped the word labels.
         val pk = peaks
         if (pk != null && pk.isNotEmpty() && duration > 0) {
             var x = 0f
@@ -227,20 +259,6 @@ class WaveformView @JvmOverloads constructor(
                 canvas.drawLine(x, waveMid - amp, x, waveMid + amp, wavePaint)
                 x += 2f
             }
-        } else {
-            // No peaks (the vocals WAV could not be downloaded/decoded).
-            // Drawn at the TOP of the waveform area, just under the ruler
-            // — never at the middle, where it used to overlap the word
-            // labels ("agad", "bumagal?") drawn at waveMid. When a retry
-            // is available the hint says so (tapping retries, see touch).
-            val hint = if (onEmptyTap != null) {
-                "No waveform — tap to retry"
-            } else {
-                "No waveform — timings still editable"
-            }
-            canvas.drawText(
-                hint, w / 2f, waveTop + hintPaint.textSize, hintPaint
-            )
         }
 
         // Word regions (only the ones in the visible window).
@@ -272,6 +290,50 @@ class WaveformView @JvmOverloads constructor(
                     waveMid + regionText.textSize / 3f, regionText
                 )
             }
+            // Visible handles on the SELECTED word only: bright white
+            // bars on its left/right edges (drag to resize) and a
+            // grip pill centred on its top edge (hold to move the
+            // word). Only when the region is wide enough to show
+            // them without crowding (at whole-song zoom a word is a
+            // few px wide — no handles there, just the border).
+            if (ref == selected && x1 - x0 >= 36f * density) {
+                val handleW = 8f * density
+                val handleR = 4f * density
+                // Left edge handle.
+                canvas.drawRoundRect(
+                    RectF(x0 - handleW / 2, waveTop, x0 + handleW / 2, waveBottom),
+                    handleR, handleR, handlePaint
+                )
+                canvas.drawLine(
+                    x0, waveTop + 6f * density,
+                    x0, waveBottom - 6f * density, handleGripPaint
+                )
+                // Right edge handle.
+                canvas.drawRoundRect(
+                    RectF(x1 - handleW / 2, waveTop, x1 + handleW / 2, waveBottom),
+                    handleR, handleR, handlePaint
+                )
+                canvas.drawLine(
+                    x1, waveTop + 6f * density,
+                    x1, waveBottom - 6f * density, handleGripPaint
+                )
+                // Top grip: a pill centred on the region's top edge,
+                // with a blue line through it so it reads as a grip.
+                val cx = (x0 + x1) / 2f
+                val gripW = 28f * density
+                val gripH = 7f * density
+                canvas.drawRoundRect(
+                    RectF(
+                        cx - gripW / 2, waveTop - gripH / 2,
+                        cx + gripW / 2, waveTop + gripH / 2
+                    ),
+                    gripH / 2, gripH / 2, handlePaint
+                )
+                canvas.drawLine(
+                    cx - gripW / 2 + 4f * density, waveTop,
+                    cx + gripW / 2 - 4f * density, waveTop, handleGripPaint
+                )
+            }
         }
 
         // Playhead.
@@ -294,7 +356,7 @@ class WaveformView @JvmOverloads constructor(
     // Touch: tap to select/seek, drag body to move, drag edges to resize.
     // ------------------------------------------------------------------
 
-    private enum class DragMode { NONE, BODY, LEFT, RIGHT, PAN }
+    private enum class DragMode { NONE, BODY, LEFT, RIGHT, PAN, TOP }
 
     private var dragMode = DragMode.NONE
     private var dragWord: WaveWord? = null
@@ -321,7 +383,7 @@ class WaveformView @JvmOverloads constructor(
                 panning = false
                 dragDownX = x
                 dragDownTime = time
-                val hit = hitWord(time, x)
+                val hit = hitWord(time, x, event.y)
                 if (hit != null) {
                     dragWord = hit.first
                     dragMode = hit.second
@@ -376,7 +438,9 @@ class WaveformView @JvmOverloads constructor(
                 val word = dragWord ?: return true
                 val dt = (x - dragDownX) / width * windowDuration
                 when (dragMode) {
-                    DragMode.BODY -> {
+                    // BODY and TOP (the top grip pill) both move the
+                    // whole word: shift both ends together.
+                    DragMode.BODY, DragMode.TOP -> {
                         // Shift both ends; clamp the shift so the word
                         // stays between its neighbours (and in the song).
                         val shift = dt.coerceIn(
@@ -443,8 +507,13 @@ class WaveformView @JvmOverloads constructor(
         return super.onTouchEvent(event)
     }
 
-    /** Hit-test: returns the word under `time` and which part (edge/body). */
-    private fun hitWord(time: Double, x: Float): Pair<WaveWord, DragMode>? {
+    /** Hit-test: returns the word under `time` and which part was
+     *  grabbed. The side handles (edges) win over the top grip —
+     *  the corners belong to the edges. The top grip and the body
+     *  both move the whole word; the side handles resize that side.
+     *  A pan only starts when NO word is hit at all. */
+    private fun hitWord(time: Double, x: Float, y: Float): Pair<WaveWord, DragMode>? {
+        val (_, waveTop, _) = waveGeometry()
         for (word in words) {
             if (time < word.start || time > word.end) continue
             val x0 = timeToX(word.start)
@@ -452,6 +521,10 @@ class WaveformView @JvmOverloads constructor(
             return when {
                 abs(x - x0) <= edgeSlopPx -> Pair(word, DragMode.LEFT)
                 abs(x - x1) <= edgeSlopPx -> Pair(word, DragMode.RIGHT)
+                // Top grip: a strip at the region's top edge — hold
+                // it to move the whole word (same as a body drag).
+                y >= waveTop - 6f * density &&
+                    y <= waveTop + 14f * density -> Pair(word, DragMode.TOP)
                 else -> Pair(word, DragMode.BODY)
             }
         }

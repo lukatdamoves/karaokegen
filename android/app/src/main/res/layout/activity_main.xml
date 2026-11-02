@@ -429,11 +429,11 @@
                     android:visibility="gone" />
 
                 <!-- Waveform with draggable word regions — pinned at the top.
-                     176dp (was 220dp): shorter so the word list gets more room. -->
+                     106dp (was 176dp): 40% shorter so the word list gets more room. -->
                 <com.lukatdamoves.karaokegen.WaveformView
                     android:id="@+id/editorWaveform"
                     android:layout_width="match_parent"
-                    android:layout_height="176dp"
+                    android:layout_height="106dp"
                     android:layout_marginTop="12dp" />
 
                 <!-- Zoom: less time across the width. -->

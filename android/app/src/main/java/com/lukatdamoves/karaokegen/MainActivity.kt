@@ -43,11 +43,11 @@ import java.util.Locale
  * does the whole thing (download the audio, then draft it on the Modal
  * backend — with lyrics, or transcribe when the lyrics box is empty).
  *
- * The page has two views, switched by visibility: home (the form,
- * with the native editor inline at the bottom once an alignment
- * finishes) and jobs (the job queue). The sidebar holds Home, Jobs,
- * Backend settings and Copy logs. Update check runs silently
- * on launch.
+ * The page has three views, switched by visibility: home (the form),
+ * editor (the native editor, taking over the whole screen once an
+ * alignment finishes — the form is hidden while editing) and jobs
+ * (the job queue). The sidebar holds Home, Jobs, Backend settings
+ * and Copy logs. Update check runs silently on launch.
  *
  * The editor is fully native (v0.3.0): a WaveformView draws the
  * vocals waveform with draggable word regions, a native word list
@@ -93,6 +93,9 @@ class MainActivity : AppCompatActivity() {
     private var editorRenderJob: Job? = null
     private var editorRenderFileId: String? = null
     private var editorRenderFilename: String? = null
+    // Render background colour (the swatches below the word list).
+    // Black by default, matching the desktop.
+    private var editorBgColor: String = "#000000"
     // Word chip views (WordRef -> chip), so the ticker can highlight
     // the currently playing word without rebuilding the list.
     private var editorChipViews: MutableMap<WordRef, TextView> = mutableMapOf()
@@ -197,9 +200,9 @@ class MainActivity : AppCompatActivity() {
         // render) — wired once; the model is swapped per draft.
         setupNativeEditor()
 
-        // Back: close the drawer first; from jobs, return home.
-        // The editor lives inline at the bottom of the home page —
-        // there is no separate editor view to leave.
+        // Back: close the drawer first; from jobs or the editor,
+        // return home. The editor takes over the whole screen, so
+        // Back from it goes back to the form.
         // (Object form, not the lambda overload — that lives in
         // activity-ktx, which this app does not depend on.)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -208,6 +211,8 @@ class MainActivity : AppCompatActivity() {
                     binding.drawerLayout.isDrawerOpen(GravityCompat.START) ->
                         binding.drawerLayout.closeDrawer(GravityCompat.START)
                     binding.jobsView.visibility == View.VISIBLE ->
+                        showHome()
+                    binding.editorView.visibility == View.VISIBLE ->
                         showHome()
                     else -> {
                         isEnabled = false
@@ -229,11 +234,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------------
-    // Views: home / jobs (one Activity, toggled by visibility). The
-    // editor lives inline at the bottom of the home page.
+    // Views: home / editor / jobs (one Activity, toggled by
+    // visibility). The editor takes over the whole screen — the
+    // home form is hidden while editing, and shown again on Back.
     // ------------------------------------------------------------------
 
     private fun showHome() {
+        pauseEditorPlayback()
+        binding.editorView.visibility = View.GONE
         binding.jobsView.visibility = View.GONE
         binding.homeView.visibility = View.VISIBLE
         binding.toolbar.title = getString(R.string.app_name)
@@ -241,6 +249,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showJobs() {
+        pauseEditorPlayback()
+        binding.editorView.visibility = View.GONE
         binding.homeView.visibility = View.GONE
         binding.jobsView.visibility = View.VISIBLE
         binding.toolbar.title = getString(R.string.jobs_title)
@@ -248,31 +258,29 @@ class MainActivity : AppCompatActivity() {
         rebuildJobsList()
     }
 
-    /** Show the native editor inline at the bottom of the home
-     *  page and load the draft. The toolbar title stays "KaraokeGen"
+    /** Show the native editor full-screen and load the draft. The
+     *  home form is hidden while editing — it is unnecessary once
+     *  the alignment is done. The toolbar title stays "KaraokeGen"
      *  — this is the same page, not a new one. Re-opening the same
      *  draft does not reload, so in-progress edits survive switching
      *  views. A Jobs tap clears loadedEditorDraft first (see
      *  rebuildJobsList) so tapping a job always reloads it. */
     private fun showEditor(draftJobId: String, songTitle: String) {
         if (draftJobId == loadedEditorDraft && editorAlignment != null) {
-            // Already loaded — just reveal and scroll to it.
-            revealEditorSection()
+            // Already loaded — just show the editor view.
+            showEditorView()
             return
         }
         loadNativeEditor(draftJobId, songTitle)
-        revealEditorSection()
+        showEditorView()
     }
 
-    private fun revealEditorSection() {
+    private fun showEditorView() {
         binding.jobsView.visibility = View.GONE
-        binding.homeView.visibility = View.VISIBLE
+        binding.homeView.visibility = View.GONE
+        binding.editorView.visibility = View.VISIBLE
         binding.toolbar.title = getString(R.string.app_name)
         binding.navView.setCheckedItem(R.id.nav_home)
-        binding.editorSection.visibility = View.VISIBLE
-        binding.editorSection.post {
-            binding.homeView.smoothScrollTo(0, binding.editorSection.top)
-        }
     }
 
     /**
@@ -431,6 +439,7 @@ class MainActivity : AppCompatActivity() {
      *  The waveform callbacks read the live model, so they are set
      *  once here — the model is swapped when a new draft loads. */
     private fun setupNativeEditor() {
+        binding.editorBackButton.setOnClickListener { showHome() }
         val wave = binding.editorWaveform
         wave.onWordTap = { ref ->
             editorSelected = ref
@@ -492,6 +501,45 @@ class MainActivity : AppCompatActivity() {
         binding.editorUndoButton.setOnClickListener { undoEditorEdit() }
         binding.editorRenderButton.setOnClickListener { onRenderTapped() }
         binding.editorDownloadButton.setOnClickListener { downloadRenderedMp4() }
+        // Background swatches: tap a colour to pick it. The selected
+        // one gets a bright ring (see updateBgSwatches).
+        binding.editorSwatchBlack.setOnClickListener {
+            editorBgColor = "#000000"
+            updateBgSwatches()
+        }
+        binding.editorSwatchNavy.setOnClickListener {
+            editorBgColor = "#14142A"
+            updateBgSwatches()
+        }
+        binding.editorSwatchWhite.setOnClickListener {
+            editorBgColor = "#FFFFFF"
+            updateBgSwatches()
+        }
+        updateBgSwatches()
+    }
+
+    /** Draw the background swatches: a solid circle of the colour,
+     *  with a bright ring on the selected one so it is obvious
+     *  which is picked. */
+    private fun updateBgSwatches() {
+        val density = resources.displayMetrics.density
+        val swatches = listOf(
+            binding.editorSwatchBlack to "#000000",
+            binding.editorSwatchNavy to "#14142A",
+            binding.editorSwatchWhite to "#FFFFFF"
+        )
+        for ((view, color) in swatches) {
+            val selected = color == editorBgColor
+            view.background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(android.graphics.Color.parseColor(color))
+                setStroke(
+                    ((if (selected) 3 else 1) * density).toInt(),
+                    if (selected) getColor(R.color.kg_primary)
+                    else getColor(R.color.kg_border)
+                )
+            }
+        }
     }
 
     // ------------------------------------------------------------------
@@ -507,8 +555,10 @@ class MainActivity : AppCompatActivity() {
         editorChipViews.clear()
         if (alignment == null) return
         val density = resources.displayMetrics.density
-        val chipPadH = (10 * density).toInt()
-        val chipPadV = (6 * density).toInt()
+        // Chips are at least 48dp tall so they are easy to tap.
+        val chipPadH = (12 * density).toInt()
+        val chipPadV = (14 * density).toInt()
+        val chipMinH = (48 * density).toInt()
         for ((li, line) in alignment.lines.withIndex()) {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -524,6 +574,8 @@ class MainActivity : AppCompatActivity() {
                 val chip = TextView(this@MainActivity).apply {
                     text = word.text.ifEmpty { "…" }
                     textSize = 15f
+                    minHeight = chipMinH
+                    gravity = android.view.Gravity.CENTER_VERTICAL
                     setPadding(chipPadH, chipPadV, chipPadH, chipPadV)
                     setTextColor(getColor(R.color.kg_text))
                     setOnClickListener {
@@ -547,6 +599,9 @@ class MainActivity : AppCompatActivity() {
             val del = TextView(this@MainActivity).apply {
                 text = "✕"
                 textSize = 18f
+                minHeight = chipMinH
+                minWidth = chipMinH
+                gravity = android.view.Gravity.CENTER
                 setPadding(chipPadH, chipPadV, chipPadH, chipPadV)
                 setTextColor(getColor(R.color.kg_error))
                 setOnClickListener { deleteEditorLine(li) }
@@ -558,14 +613,29 @@ class MainActivity : AppCompatActivity() {
         binding.editorUndoButton.isEnabled = editorUndoStack.isNotEmpty()
     }
 
-    /** Set each chip's background from its state: selected (solid
-     *  blue), currently playing (darker blue + white border), or
-     *  plain (panel + border). Cheap — no rebuild. */
+    /** Set each chip's background from its state: currently playing
+     *  (brightest — light blue + white ring), selected (solid blue),
+     *  or plain (panel + border). The playing word wins when a chip
+     *  is both selected and playing. Cheap — no rebuild. */
     private fun refreshChipHighlights() {
         for ((ref, chip) in editorChipViews) {
             val selected = ref == editorSelected
             val current = ref == editorCurrentWord
             chip.background = chipBackground(selected, current)
+            when {
+                current -> {
+                    chip.setTextColor(getColor(android.R.color.white))
+                    chip.setTypeface(Typeface.DEFAULT_BOLD)
+                }
+                selected -> {
+                    chip.setTextColor(getColor(android.R.color.white))
+                    chip.setTypeface(Typeface.DEFAULT_BOLD)
+                }
+                else -> {
+                    chip.setTextColor(getColor(R.color.kg_text))
+                    chip.setTypeface(Typeface.DEFAULT)
+                }
+            }
         }
     }
 
@@ -575,13 +645,14 @@ class MainActivity : AppCompatActivity() {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = 8f * density
             when {
-                selected -> setColor(getColor(R.color.kg_primary))
                 current -> {
-                    setColor(getColor(R.color.kg_primary_dark))
+                    // Playing now — the brightest chip, with a ring.
+                    setColor(getColor(R.color.kg_primary_light))
                     setStroke(
-                        (1 * density).toInt(), getColor(android.R.color.white)
+                        (2 * density).toInt(), getColor(android.R.color.white)
                     )
                 }
+                selected -> setColor(getColor(R.color.kg_primary))
                 else -> {
                     setColor(getColor(R.color.kg_panel))
                     setStroke(
@@ -776,6 +847,17 @@ class MainActivity : AppCompatActivity() {
         editorTicker = null
     }
 
+    /** Pause the editor's playback (leaving the editor for the
+     *  form or the jobs list must not leave audio playing). */
+    private fun pauseEditorPlayback() {
+        val mp = editorPlayer ?: return
+        if (!mp.isPlaying) return
+        mp.pause()
+        editorPlayWordEnd = null
+        binding.editorPlayButton.text = getString(R.string.player_play)
+        stopEditorTicker()
+    }
+
     private fun releaseEditorPlayer() {
         stopEditorTicker()
         editorPlayerFile = null
@@ -798,13 +880,7 @@ class MainActivity : AppCompatActivity() {
     // Native editor: render MP4 (POST /render-word, poll, download).
     // ------------------------------------------------------------------
 
-    private fun selectedBgColor(): String {
-        return when {
-            binding.editorBgNavy.isChecked -> "#14142A"
-            binding.editorBgWhite.isChecked -> "#FFFFFF"
-            else -> "#000000"
-        }
-    }
+    private fun selectedBgColor(): String = editorBgColor
 
     private fun onRenderTapped() {
         val alignment = editorAlignment ?: return

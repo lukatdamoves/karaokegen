@@ -11,12 +11,12 @@ android {
         applicationId = "com.lukatdamoves.karaokegen"
         minSdk = 26
         targetSdk = 35
-        versionCode = 27
+        versionCode = 28
         // v0.3.0: native editor (waveform, draggable words, playback,
         // render) — the WebView editor is gone. Bump versionCode on
         // EVERY release — the in-app updater compares it against the
         // APK asset on GitHub Releases.
-        versionName = "0.3.0-trial"
+        versionName = "0.3.1-trial"
     }
 
     // Release signing comes from CI-injected properties (see android/README.md).

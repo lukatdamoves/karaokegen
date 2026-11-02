@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One page: home form (with the native editor inline at the
-     bottom once an alignment finishes) and the jobs list all live
-     here, switched by visibility. The sidebar (NavigationView) holds
-     Home, Jobs, Backend settings and Copy logs. -->
+<!-- One page: home form, the native editor (takes over the
+     whole screen once an alignment finishes) and the jobs list
+     all live here, switched by visibility. The sidebar
+     (NavigationView) holds Home, Jobs, Backend settings and
+     Copy logs. -->
 <androidx.drawerlayout.widget.DrawerLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -330,215 +331,6 @@
                         android:textAppearance="?attr/textAppearanceBodyMedium"
                         android:visibility="gone" />
 
-                    <!-- EDITOR: native editor (no WebView) — waveform,
-                         word list and render, in the homepage theme.
-                         Shown when an alignment finishes; the page
-                         scrolls down to it. -->
-                    <LinearLayout
-                        android:id="@+id/editorSection"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="24dp"
-                        android:orientation="vertical"
-                        android:visibility="gone">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/nav_editor"
-                            android:textAppearance="?attr/textAppearanceTitleMedium" />
-
-                        <TextView
-                            android:id="@+id/editorSongTitle"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
-                            android:textAppearance="?attr/textAppearanceBodyMedium" />
-
-                        <TextView
-                            android:id="@+id/editorStatus"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
-                            android:textAppearance="?attr/textAppearanceBodyMedium"
-                            android:visibility="gone" />
-
-                        <ProgressBar
-                            android:id="@+id/editorLoading"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_gravity="center_horizontal"
-                            android:layout_marginTop="12dp"
-                            android:visibility="gone" />
-
-                        <!-- Waveform with draggable word regions. -->
-                        <com.lukatdamoves.karaokegen.WaveformView
-                            android:id="@+id/editorWaveform"
-                            android:layout_width="match_parent"
-                            android:layout_height="220dp"
-                            android:layout_marginTop="12dp" />
-
-                        <!-- Zoom: less time across the width. -->
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
-                            android:orientation="horizontal"
-                            android:gravity="center_vertical">
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/editor_zoom" />
-
-                            <SeekBar
-                                android:id="@+id/editorZoomBar"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:layout_marginStart="8dp"
-                                android:max="100" />
-                        </LinearLayout>
-
-                        <!-- Playback: play the vocals, jump between lines. -->
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
-                            android:orientation="horizontal"
-                            android:gravity="center_vertical">
-
-                            <Button
-                                android:id="@+id/editorPrevButton"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/editor_prev"
-                                style="?attr/materialButtonOutlinedStyle" />
-
-                            <Button
-                                android:id="@+id/editorPlayButton"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginStart="8dp"
-                                android:text="@string/player_play"
-                                style="?attr/materialButtonOutlinedStyle" />
-
-                            <Button
-                                android:id="@+id/editorNextButton"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginStart="8dp"
-                                android:text="@string/editor_next"
-                                style="?attr/materialButtonOutlinedStyle" />
-
-                            <TextView
-                                android:id="@+id/editorTimeLabel"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginStart="12dp"
-                                android:text="0:00 / 0:00"
-                                android:textAppearance="?attr/textAppearanceBodyMedium" />
-                        </LinearLayout>
-
-                        <!-- Word list: tap a word to play just it,
-                             long-press it to fix its text. -->
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="16dp"
-                            android:text="@string/editor_words_hint"
-                            android:textAppearance="?attr/textAppearanceBodyMedium" />
-
-                        <LinearLayout
-                            android:id="@+id/editorWordList"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
-                            android:orientation="vertical" />
-
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
-                            android:orientation="horizontal">
-
-                            <Button
-                                android:id="@+id/editorAddLineButton"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/editor_add_line"
-                                style="?attr/materialButtonOutlinedStyle" />
-
-                            <Button
-                                android:id="@+id/editorUndoButton"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginStart="8dp"
-                                android:text="@string/editor_undo"
-                                style="?attr/materialButtonOutlinedStyle" />
-                        </LinearLayout>
-
-                        <!-- Render: background colour + Render MP4. -->
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="20dp"
-                            android:text="@string/editor_render_title"
-                            android:textAppearance="?attr/textAppearanceTitleSmall" />
-
-                        <RadioGroup
-                            android:id="@+id/editorBgGroup"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="horizontal">
-
-                            <RadioButton
-                                android:id="@+id/editorBgBlack"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:checked="true"
-                                android:text="@string/editor_bg_black" />
-
-                            <RadioButton
-                                android:id="@+id/editorBgNavy"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginStart="16dp"
-                                android:text="@string/editor_bg_navy" />
-
-                            <RadioButton
-                                android:id="@+id/editorBgWhite"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginStart="16dp"
-                                android:text="@string/editor_bg_white" />
-                        </RadioGroup>
-
-                        <Button
-                            android:id="@+id/editorRenderButton"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
-                            android:text="@string/editor_render" />
-
-                        <TextView
-                            android:id="@+id/editorRenderStatus"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
-                            android:textAppearance="?attr/textAppearanceBodyMedium"
-                            android:visibility="gone" />
-
-                        <Button
-                            android:id="@+id/editorDownloadButton"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
-                            android:text="@string/editor_download"
-                            android:visibility="gone"
-                            style="?attr/materialButtonOutlinedStyle" />
-                    </LinearLayout>
-
                 </LinearLayout>
             </ScrollView>
 
@@ -579,6 +371,250 @@
 
                 </LinearLayout>
             </ScrollView>
+
+            <!-- EDITOR: native editor (no WebView) — takes over the
+                 whole screen when an alignment finishes. The waveform
+                 + playback stay pinned at the top; the tappable words
+                 scroll below them; render controls sit at the bottom. -->
+            <LinearLayout
+                android:id="@+id/editorView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:visibility="gone"
+                android:paddingLeft="16dp"
+                android:paddingTop="12dp"
+                android:paddingRight="16dp"
+                android:paddingBottom="16dp">
+
+                <!-- Header: back to the form + the song being edited. -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <Button
+                        android:id="@+id/editorBackButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="48dp"
+                        android:text="@string/editor_back"
+                        style="?attr/materialButtonOutlinedStyle" />
+
+                    <TextView
+                        android:id="@+id/editorSongTitle"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="12dp"
+                        android:ellipsize="end"
+                        android:maxLines="1"
+                        android:textAppearance="?attr/textAppearanceTitleMedium" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/editorStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                    android:visibility="gone" />
+
+                <ProgressBar
+                    android:id="@+id/editorLoading"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginTop="12dp"
+                    android:visibility="gone" />
+
+                <!-- Waveform with draggable word regions — pinned at the top. -->
+                <com.lukatdamoves.karaokegen.WaveformView
+                    android:id="@+id/editorWaveform"
+                    android:layout_width="match_parent"
+                    android:layout_height="220dp"
+                    android:layout_marginTop="12dp" />
+
+                <!-- Zoom: less time across the width. -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/editor_zoom" />
+
+                    <SeekBar
+                        android:id="@+id/editorZoomBar"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp"
+                        android:max="100" />
+                </LinearLayout>
+
+                <!-- Playback: play the vocals, jump between lines. -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <Button
+                        android:id="@+id/editorPrevButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="48dp"
+                        android:text="@string/editor_prev"
+                        style="?attr/materialButtonOutlinedStyle" />
+
+                    <Button
+                        android:id="@+id/editorPlayButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="48dp"
+                        android:layout_marginStart="8dp"
+                        android:text="@string/player_play" />
+
+                    <Button
+                        android:id="@+id/editorNextButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="48dp"
+                        android:layout_marginStart="8dp"
+                        android:text="@string/editor_next"
+                        style="?attr/materialButtonOutlinedStyle" />
+
+                    <TextView
+                        android:id="@+id/editorTimeLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="12dp"
+                        android:text="0:00 / 0:00"
+                        android:textAppearance="?attr/textAppearanceBodyMedium" />
+                </LinearLayout>
+
+                <!-- Word list: tap a word to play just it,
+                     long-press it to fix its text. -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/editor_words_hint"
+                    android:textAppearance="?attr/textAppearanceBodyMedium" />
+
+                <!-- Tappable words — scrollable, takes the remaining
+                     space so the waveform stays pinned at the top. -->
+                <ScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:layout_marginTop="8dp"
+                    android:fillViewport="true">
+
+                    <LinearLayout
+                        android:id="@+id/editorWordList"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
+                </ScrollView>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/editorAddLineButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="48dp"
+                        android:text="@string/editor_add_line"
+                        style="?attr/materialButtonOutlinedStyle" />
+
+                    <Button
+                        android:id="@+id/editorUndoButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="48dp"
+                        android:layout_marginStart="8dp"
+                        android:text="@string/editor_undo"
+                        style="?attr/materialButtonOutlinedStyle" />
+                </LinearLayout>
+
+                <!-- Render: background colour + Render MP4. -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/editor_render_title"
+                    android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/editor_bg_label" />
+
+                    <View
+                        android:id="@+id/editorSwatchBlack"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:layout_marginStart="12dp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:contentDescription="@string/editor_bg_black" />
+
+                    <View
+                        android:id="@+id/editorSwatchNavy"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:layout_marginStart="16dp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:contentDescription="@string/editor_bg_navy" />
+
+                    <View
+                        android:id="@+id/editorSwatchWhite"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:layout_marginStart="16dp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:contentDescription="@string/editor_bg_white" />
+                </LinearLayout>
+
+                <Button
+                    android:id="@+id/editorRenderButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="56dp"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/editor_render" />
+
+                <TextView
+                    android:id="@+id/editorRenderStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/editorDownloadButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/editor_download"
+                    android:visibility="gone"
+                    style="?attr/materialButtonOutlinedStyle" />
+            </LinearLayout>
 
         </FrameLayout>
     </LinearLayout>

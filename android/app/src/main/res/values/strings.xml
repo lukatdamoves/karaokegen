@@ -35,6 +35,8 @@
     <string name="draft_ready_title">Draft ready</string>
 
     <string name="editor_zoom">Zoom</string>
+    <string name="editor_back">← Back</string>
+    <string name="editor_bg_label">Background:</string>
     <string name="editor_prev">◀ Prev</string>
     <string name="editor_next">Next ▶</string>
     <string name="editor_words_hint">Words — tap a word to play just it, long-press it to fix its text. Drag a word on the waveform to move it, or drag its edges to resize it.</string>

@@ -8,6 +8,7 @@
     <color name="kg_border_soft">#26264A</color>
     <color name="kg_primary">#4A6CF7</color>
     <color name="kg_primary_dark">#3A5CE7</color>
+    <color name="kg_primary_light">#7A96FF</color>
     <color name="kg_text">#E0E0E0</color>
     <color name="kg_muted">#8A9AB8</color>
     <color name="kg_success">#2ECC71</color>

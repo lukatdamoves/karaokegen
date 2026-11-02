@@ -28,8 +28,11 @@ import kotlin.math.min
  *    neighbours.
  *  - DRAG a region's LEFT/RIGHT EDGE (or its side handles) to
  *    resize it, clamped to its neighbours and to a 0.05s minimum
- *    duration.
- *  - DRAG empty waveform space to pan the time window.
+ *    duration. The handles are 12dp wide with a 20dp grab zone.
+ *  - DRAG empty waveform space to pan the time window — or grab
+ *    the tall ruler strip with the time numbers at the top (56dp):
+ *    touching the ruler ALWAYS pans, so it is the reliable scroll
+ *    handle even where a word sits underneath it.
  *  - TAP empty waveform to seek the playhead there (onSeekTo).
  *
  * Only the visible time window is drawn ([windowStart,
@@ -94,7 +97,7 @@ class WaveformView @JvmOverloads constructor(
     private val bgPaint = Paint().apply { color = Color.parseColor("#0F1626") }
     private val rulerPaint = Paint().apply {
         color = Color.parseColor("#8A9AB8")
-        textSize = 11f * density
+        textSize = 14f * density
         isAntiAlias = true
     }
     private val tickPaint = Paint().apply {
@@ -203,9 +206,13 @@ class WaveformView @JvmOverloads constructor(
     /** Geometry of the drawing area: the time ruler sits on top,
      *  the waveform + word regions below it. Shared by onDraw and
      *  the hit-test so they can never disagree about where the top
-     *  grip strip is. Returns (rulerH, waveTop, waveBottom). */
+     *  grip strip is. Returns (rulerH, waveTop, waveBottom).
+     *  The ruler is 56dp tall (~2.5x the old 22dp) — it is the
+     *  scroll handle: the strip with the time numbers is where the
+     *  finger grabs to pan sideways, so it has to be a big, easy
+     *  target. Touching the ruler ALWAYS pans (see hitWord). */
     private fun waveGeometry(): Triple<Float, Float, Float> {
-        val rulerH = 22f * density
+        val rulerH = 56f * density
         val waveTop = rulerH + 4f * density
         val waveBottom = height.toFloat() - 4f * density
         return Triple(rulerH, waveTop, waveBottom)
@@ -236,8 +243,8 @@ class WaveformView @JvmOverloads constructor(
         if (t < windowStart) t += step
         while (t <= windowStart + windowDuration) {
             val x = timeToX(t)
-            canvas.drawLine(x, rulerH - 8f * density, x, rulerH, tickPaint)
-            canvas.drawText(formatRuler(t), x + 3f * density, rulerH - 10f * density, rulerPaint)
+            canvas.drawLine(x, rulerH - 10f * density, x, rulerH, tickPaint)
+            canvas.drawText(formatRuler(t), x + 3f * density, rulerH - 12f * density, rulerPaint)
             t += step
         }
         // Ruler baseline.
@@ -297,7 +304,10 @@ class WaveformView @JvmOverloads constructor(
             // them without crowding (at whole-song zoom a word is a
             // few px wide — no handles there, just the border).
             if (ref == selected && x1 - x0 >= 36f * density) {
-                val handleW = 8f * density
+                // 12dp wide (was 8dp) so a finger can actually grab
+                // the edge — see edgeSlopPx, the hit zone is wider
+                // still (20dp each side).
+                val handleW = 12f * density
                 val handleR = 4f * density
                 // Left edge handle.
                 canvas.drawRoundRect(
@@ -372,7 +382,10 @@ class WaveformView @JvmOverloads constructor(
     // auto-follow pauses (see ensureVisible).
     private var panning = false
     private var panWindowStart = 0.0
-    private val edgeSlopPx = 14f * density
+    // Hit tolerance around a word's edges: a finger within 20dp of
+    // an edge grabs it (was 14dp). The visible handle is 12dp wide,
+    // so the grab zone sticks out ~8dp past the handle on each side.
+    private val edgeSlopPx = 20f * density
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val x = event.x
@@ -508,12 +521,19 @@ class WaveformView @JvmOverloads constructor(
     }
 
     /** Hit-test: returns the word under `time` and which part was
-     *  grabbed. The side handles (edges) win over the top grip —
-     *  the corners belong to the edges. The top grip and the body
-     *  both move the whole word; the side handles resize that side.
-     *  A pan only starts when NO word is hit at all. */
+     *  grabbed. The ruler strip (the tall band with the time
+     *  numbers) is the scroll handle — touching it ALWAYS pans,
+     *  even when the time under the finger falls inside a word, so
+     *  the ruler can never grab a word instead of scrolling. The
+     *  side handles (edges) win over the top grip — the corners
+     *  belong to the edges. The top grip and the body both move the
+     *  whole word; the side handles resize that side. A pan only
+     *  starts when NO word is hit at all (or the touch is on the
+     *  ruler). */
     private fun hitWord(time: Double, x: Float, y: Float): Pair<WaveWord, DragMode>? {
-        val (_, waveTop, _) = waveGeometry()
+        val (rulerH, waveTop, _) = waveGeometry()
+        // Ruler = scroll handle: never a word, always a pan.
+        if (y < rulerH) return null
         for (word in words) {
             if (time < word.start || time > word.end) continue
             val x0 = timeToX(word.start)

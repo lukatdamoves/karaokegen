@@ -12,6 +12,29 @@ object SettingsStore {
     private const val KEY_URL = "modal_url"
     private const val KEY_API = "modal_key"
     private const val KEY_SETUP_JOB = "setup_job_id"
+    private const val KEY_BV_LAST = "bv_mode_last"
+    private const val KEY_BV_PREFIX = "bv_mode_"
+
+    /** Backing-vocals render choice: 0 = Vocals, 1 = Backing vocals,
+     *  2 = Vocals + backing vocals. Stored per draft id so going
+     *  back to a job restores its choice, and the last choice is
+     *  remembered as the default for a new draft. */
+    fun getBvMode(context: Context, draftId: String): Int {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (draftId.isNotEmpty()) {
+            val perDraft = prefs.getInt(KEY_BV_PREFIX + draftId, -1)
+            if (perDraft in 0..2) return perDraft
+        }
+        return prefs.getInt(KEY_BV_LAST, 0).coerceIn(0, 2)
+    }
+
+    fun saveBvMode(context: Context, draftId: String, mode: Int) {
+        val m = mode.coerceIn(0, 2)
+        val edit = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putInt(KEY_BV_LAST, m)
+        if (draftId.isNotEmpty()) edit.putInt(KEY_BV_PREFIX + draftId, m)
+        edit.apply()
+    }
 
     fun getBaseUrl(context: Context): String =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

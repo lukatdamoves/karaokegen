@@ -12,8 +12,11 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.TypedValue
+import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.SeekBar
@@ -97,6 +100,18 @@ class MainActivity : AppCompatActivity() {
     // Render background colour (the swatches below the word list).
     // Black by default, matching the desktop.
     private var editorBgColor: String = "#000000"
+    // Backing-vocals render choice (the dropdown under Prev/Play/
+    // Next): 0 = Vocals, 1 = Backing vocals, 2 = Vocals + backing
+    // vocals. Stored per draft (SettingsStore) so going back to a
+    // job restores its choice; a new draft starts from the last
+    // choice instead of silently resetting to Vocals.
+    private var editorBvMode: Int = 0
+    // True once the BV spinner's listener is live. Set false while
+    // a selection is applied programmatically (restore on draft
+    // load) so it does not re-save the same value / clobber the
+    // per-draft restore. The Spinner fires onItemSelected once when
+    // its adapter is first set, before the listener is attached.
+    private var bvSpinnerReady: Boolean = false
     // Guards against a slow load overwriting a newer one: each
     // loadNativeEditor bumps this, and a load that finds the number
     // changed after an await stops instead of clobbering the editor
@@ -331,6 +346,14 @@ class MainActivity : AppCompatActivity() {
         editorDraftJobId = draftJobId
         editorSongTitle = songTitle
         loadedEditorDraft = draftJobId
+        // Restore this draft's BV render choice (or the last choice
+        // for a new draft) and show it in the dropdown. The
+        // suppress-flag stops the programmatic selection from
+        // re-saving over the per-draft value.
+        editorBvMode = SettingsStore.getBvMode(this, draftJobId)
+        bvSpinnerReady = false
+        binding.editorBvSpinner.setSelection(editorBvMode)
+        bvSpinnerReady = true
         val seq = ++editorLoadSeq
         binding.editorSongTitle.text = songTitle
         binding.editorStatus.visibility = View.GONE
@@ -727,6 +750,38 @@ class MainActivity : AppCompatActivity() {
         binding.editorPlayButton.setOnClickListener { onEditorPlayPause() }
         binding.editorPrevButton.setOnClickListener { editorJumpLine(-1) }
         binding.editorNextButton.setOnClickListener { editorJumpLine(1) }
+        // Backing vocals for the render (the dropdown under the
+        // playback buttons). Selection first, listener second — the
+        // Spinner fires onItemSelected once when the adapter is set,
+        // and that must not save anything. Starts from the last
+        // choice; a draft load restores that draft's own choice
+        // (see loadNativeEditor).
+        editorBvMode = SettingsStore.getBvMode(this, "")
+        val bvAdapter = ArrayAdapter.createFromResource(
+            this, R.array.editor_bv_options,
+            android.R.layout.simple_spinner_item
+        ).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        binding.editorBvSpinner.adapter = bvAdapter
+        binding.editorBvSpinner.setSelection(editorBvMode)
+        bvSpinnerReady = true
+        binding.editorBvSpinner.onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(
+                    parent: AdapterView<*>?, view: View?,
+                    position: Int, id: Long
+                ) {
+                    if (!bvSpinnerReady) return
+                    editorBvMode = position.coerceIn(0, 2)
+                    SettingsStore.saveBvMode(
+                        this@MainActivity, editorDraftJobId, editorBvMode
+                    )
+                    AppLog.d("Editor", "BV render mode = $editorBvMode")
+                }
+
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
+            }
         binding.editorAddLineButton.setOnClickListener { addEditorLine() }
         binding.editorUndoButton.setOnClickListener { undoEditorEdit() }
         binding.editorRenderButton.setOnClickListener { onRenderTapped() }
@@ -810,18 +865,38 @@ class MainActivity : AppCompatActivity() {
                     gravity = android.view.Gravity.CENTER_VERTICAL
                     setPadding(chipPadH, chipPadV, chipPadH, chipPadV)
                     setTextColor(getColor(R.color.kg_text))
-                    setOnClickListener {
-                        editorSelected = ref
-                        syncWaveform()
-                        refreshChipHighlights()
-                        playEditorWord(ref)
-                    }
-                    setOnLongClickListener {
-                        editorSelected = ref
-                        syncWaveform()
-                        refreshChipHighlights()
-                        editEditorWord(ref)
-                        true
+                    // Single tap plays just this word; DOUBLE-TAP
+                    // edits its text. Long-press no longer edits
+                    // (removed — it fired by accident while scrolling
+                    // the word list). GestureDetector: onDown must
+                    // return true or no tap callbacks fire at all.
+                    // onSingleTapConfirmed waits ~300ms to rule out a
+                    // second tap, so a single-tap play is slightly
+                    // delayed — the standard double-tap trade-off.
+                    // A scroll (the list is in a ScrollView) never
+                    // fires either callback, so scrolling still works.
+                    val detector = GestureDetector(
+                        this@MainActivity,
+                        object : GestureDetector.SimpleOnGestureListener() {
+                            override fun onDown(e: MotionEvent): Boolean = true
+                            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                                editorSelected = ref
+                                syncWaveform()
+                                refreshChipHighlights()
+                                playEditorWord(ref)
+                                return true
+                            }
+                            override fun onDoubleTap(e: MotionEvent): Boolean {
+                                editorSelected = ref
+                                syncWaveform()
+                                refreshChipHighlights()
+                                editEditorWord(ref)
+                                return true
+                            }
+                        }
+                    )
+                    setOnTouchListener { _, event ->
+                        detector.onTouchEvent(event)
                     }
                 }
                 editorChipViews[ref] = chip
@@ -1132,15 +1207,31 @@ class MainActivity : AppCompatActivity() {
         // draft id, the CURRENT edited alignment, final lyrics,
         // background colour, output name. /render-word forces
         // word_level=true + highlight=word server-side.
+        //
+        // Backing vocals (RenderRequest.second_voice, gain 1.0 —
+        // the desktop's "2nd voice" checkbox): the render bed is
+        // ALWAYS the instrumental; second_voice=true mixes the
+        // backing-vocals stem (backing_vocals.wav, written by the
+        // draft's 3-stem pass) into it. So:
+        //   0 "Vocals" = instrumental only (today's render).
+        //   1 "Backing vocals" = BV mixed in (same audio as 2 —
+        //     the backend has NO BV-only mode, the instrumental is
+        //     always the base; a true BV-only render needs a
+        //     backend change).
+        //   2 "Vocals + backing vocals" = instrumental + BV.
+        // The /backing-vocals streaming endpoint is NOT needed here
+        // — the render reads the same stem file server-side, so an
+        // old 500 on that endpoint does not block the BV mix.
         val body = JSONObject().apply {
             put("draft_job_id", editorDraftJobId)
             put("alignment", alignment.toAlignmentJson())
             put("final_lyrics", alignment.finalLyrics())
             put("bg_color", selectedBgColor())
             put("output_name", outputName)
-            put("second_voice", false)
+            put("second_voice", editorBvMode != 0)
             put("second_voice_gain", 1.0)
         }
+        AppLog.d("Editor", "Render submitted with BV mode $editorBvMode (second_voice=${editorBvMode != 0})")
         binding.editorRenderButton.isEnabled = false
         binding.editorDownloadButton.visibility = View.GONE
         editorRenderFileId = null

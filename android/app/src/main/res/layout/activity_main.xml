@@ -497,7 +497,32 @@
                         android:textAppearance="?attr/textAppearanceBodyMedium" />
                 </LinearLayout>
 
-                <!-- Word list hint — exactly ONE line: 48 chars at 12sp
+                <!-- Backing vocals for the render: which vocal stem
+                     goes into the MP4. Directly under the playback
+                     buttons (the row is full — Prev/Play/Next + the
+                     time label leave no room for a dropdown beside
+                     them). Default "Vocals" = today's render. -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/editor_bv_label" />
+
+                    <Spinner
+                        android:id="@+id/editorBvSpinner"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp" />
+                </LinearLayout>
+
+                <!-- Word list hint — exactly ONE line: 47 chars at 12sp
                      fits a ~360dp phone (328dp of content, ~6dp/char).
                      No ellipsize — the full text is visible. -->
                 <TextView

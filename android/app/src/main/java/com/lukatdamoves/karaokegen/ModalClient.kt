@@ -61,11 +61,15 @@ class ModalClient(baseUrl: String, private val apiKey: String) {
                     )
                     .includeIPv6(false)
                     .build()
-                Dns { hostname ->
-                    try {
-                        doh.lookup(hostname)
-                    } catch (e: Exception) {
-                        Dns.SYSTEM.lookup(hostname)
+                // NOTE: okhttp3.Dns is a Kotlin interface (not a fun
+                // interface), so no SAM/lambda form — use an object.
+                object : Dns {
+                    override fun lookup(hostname: String): List<InetAddress> {
+                        return try {
+                            doh.lookup(hostname)
+                        } catch (e: Exception) {
+                            Dns.SYSTEM.lookup(hostname)
+                        }
                     }
                 }
             } catch (e: Exception) {

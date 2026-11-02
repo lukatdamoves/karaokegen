@@ -11,11 +11,12 @@ android {
         applicationId = "com.lukatdamoves.karaokegen"
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        // Full version (0.2.0): the editor + render, not just the trial
-        // draft. Bump versionCode on EVERY release — the in-app
-        // updater compares it against the APK asset on GitHub Releases.
-        versionName = "0.2.9-trial"
+        versionCode = 27
+        // v0.3.0: native editor (waveform, draggable words, playback,
+        // render) — the WebView editor is gone. Bump versionCode on
+        // EVERY release — the in-app updater compares it against the
+        // APK asset on GitHub Releases.
+        versionName = "0.3.0-trial"
     }
 
     // Release signing comes from CI-injected properties (see android/README.md).
@@ -49,57 +50,8 @@ android {
 
     buildFeatures {
         viewBinding = true
-        // LocalApiServer stamps the editor with the app version.
-        buildConfig = true
     }
 }
-
-// ------------------------------------------------------------------
-// Editor assets: single-sourced from the desktop editor (local_app/).
-// The copy runs before every build; if the desktop editor files are
-// missing, the build FAILS here instead of shipping a stale copy.
-// ------------------------------------------------------------------
-val editorAssetsDir = layout.buildDirectory.dir("generated/editorAssets")
-val copyEditorAssets by tasks.registering(Copy::class) {
-    val localApp = rootProject.projectDir.resolve("../local_app")
-    val editorHtml = localApp.resolve("templates/editor.html")
-    val editorStatic = localApp.resolve("static")
-    val requiredStatic = listOf(
-        "editor.js", "style.css", "wavesurfer.min.js", "regions.min.js", "favicon.ico"
-    )
-    doFirst {
-        require(editorHtml.isFile) {
-            "Desktop editor missing: $editorHtml — local_app/templates/editor.html must exist."
-        }
-        for (name in requiredStatic) {
-            require(editorStatic.resolve(name).isFile) {
-                "Desktop editor file missing: ${editorStatic.resolve(name)}."
-            }
-        }
-    }
-    from(editorHtml) { into("editor") }
-    from(editorStatic) {
-        include(requiredStatic)
-        into("editor")
-    }
-    into(editorAssetsDir)
-    doLast {
-        val out = editorAssetsDir.get().asFile.resolve("editor")
-        val missing = (listOf("editor.html") + requiredStatic)
-            .filterNot { out.resolve(it).isFile }
-        check(missing.isEmpty()) {
-            "Editor assets missing after copy: ${missing.joinToString()}."
-        }
-    }
-}
-android {
-    sourceSets {
-        named("main") {
-            assets.srcDir(editorAssetsDir)
-        }
-    }
-}
-tasks.named("preBuild").configure { dependsOn(copyEditorAssets) }
 
 // The APK is renamed by the CI workflow after the build (see
 // .github/workflows/build-android-trial.yml) to
@@ -117,9 +69,6 @@ dependencies {
     // phone's carrier DNS drops "Unable to resolve host" blips that
     // made the draft poll hiccup. Same 4.12.0 as okhttp.
     implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")
-    // Tiny localhost HTTP server for the editor (serves editor.html and
-    // proxies /api/* to the Modal backend). Much lighter than Ktor.
-    implementation("org.nanohttpd:nanohttpd:2.3.1")
     // YouTube audio extraction (JitPack — not on Maven Central).
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
 }

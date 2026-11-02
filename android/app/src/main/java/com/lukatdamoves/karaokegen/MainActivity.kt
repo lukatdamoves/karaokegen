@@ -1,33 +1,27 @@
 package com.lukatdamoves.karaokegen
 
-import android.app.DownloadManager
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.media.MediaPlayer
-import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.provider.MediaStore
 import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewGroup
-import android.webkit.URLUtil
-import android.webkit.ValueCallback
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.ActionBarDrawerToggle
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.GravityCompat
 import androidx.lifecycle.lifecycleScope
@@ -41,6 +35,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.text.SimpleDateFormat
+import java.util.ArrayDeque
 import java.util.Locale
 
 /**
@@ -49,10 +44,16 @@ import java.util.Locale
  * backend — with lyrics, or transcribe when the lyrics box is empty).
  *
  * The page has two views, switched by visibility: home (the form,
- * with the editor WebView inline at the bottom once an alignment
- * finishes) and jobs (the job queue). The sidebar holds Home, Editor,
- * Jobs, Backend settings and Copy logs. Update check runs silently
+ * with the native editor inline at the bottom once an alignment
+ * finishes) and jobs (the job queue). The sidebar holds Home, Jobs,
+ * Backend settings and Copy logs. Update check runs silently
  * on launch.
+ *
+ * The editor is fully native (v0.3.0): a WaveformView draws the
+ * vocals waveform with draggable word regions, a native word list
+ * edits the text, and Render MP4 posts the edited alignment to the
+ * backend. No WebView — the desktop editor's look never matched
+ * the app, so it is gone.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -68,19 +69,34 @@ class MainActivity : AppCompatActivity() {
     private var cachedResolved: YoutubeAudio.ResolvedAudio? = null
     private var cachedSendFile: File? = null
 
-    // Editor (inline WebView) state.
-    private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
-    private var webViewSetupDone = false
-    // Draft id + call id currently loaded in the WebView (null =
-    // nothing loaded yet). A repeat open of the same draft AND call
-    // does NOT reload the page, so in-progress edits in the editor
-    // survive switching views. Both are compared: the draft id is
+    // Native editor state (replaces the old WebView editor).
+    // The draft id currently loaded (null = nothing loaded yet).
+    // A repeat open of the same draft does NOT reload, so
+    // in-progress edits survive switching views. The draft id is
     // the AUDIO HASH, so a different run of the same song shares it
-    // but has a different call id — comparing only the draft id
-    // wrongly skipped the reload, and tapping a job for the same
-    // song did nothing.
+    // — callers that must force a reload (a Jobs tap) clear this
+    // first.
     private var loadedEditorDraft: String? = null
-    private var loadedEditorCall: String? = null
+    private var editorAlignment: EditorAlignment? = null
+    private var editorDraftJobId: String = ""
+    private var editorSongTitle: String = ""
+    private var editorUndoStack: ArrayDeque<EditorAlignment> = ArrayDeque()
+    private var editorSelected: WordRef? = null
+    // Editor playback (separate MediaPlayer from the homepage one).
+    private var editorPlayer: MediaPlayer? = null
+    private var editorPlayerFile: File? = null
+    private var editorTicker: Job? = null
+    private var editorPlayWordEnd: Double? = null
+    private var editorPeaks: FloatArray? = null
+    private var editorWindowStart: Double = 0.0
+    private var editorWindowDuration: Double = 0.0
+    private var editorRenderJob: Job? = null
+    private var editorRenderFileId: String? = null
+    private var editorRenderFilename: String? = null
+    // Word chip views (WordRef -> chip), so the ticker can highlight
+    // the currently playing word without rebuilding the list.
+    private var editorChipViews: MutableMap<WordRef, TextView> = mutableMapOf()
+    private var editorCurrentWord: WordRef? = null
 
     // Audio player (listen while fixing the lyrics).
     private var mediaPlayer: MediaPlayer? = null
@@ -91,26 +107,6 @@ class MainActivity : AppCompatActivity() {
     // the lyrics box (the user is fixing lyrics). It is prepared as
     // soon as the audio downloads, but stays hidden until then.
     private var playerRevealAllowed = false
-
-    private val fileChooserLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val cb = fileChooserCallback
-        fileChooserCallback = null
-        if (result.resultCode == RESULT_OK) {
-            val data = result.data
-            val uris = mutableListOf<Uri>()
-            data?.data?.let { uris.add(it) }
-            data?.clipData?.let { clip ->
-                for (i in 0 until clip.itemCount) {
-                    clip.getItemAt(i).uri?.let { uris.add(it) }
-                }
-            }
-            cb?.onReceiveValue(uris.toTypedArray())
-        } else {
-            cb?.onReceiveValue(null)
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -197,8 +193,13 @@ class MainActivity : AppCompatActivity() {
             pendingUpdate = null
         }
 
-        // Back: close the drawer first; in the editor, go back in the
-        // WebView first; from jobs, return home.
+        // Native editor controls (waveform, playback, word list,
+        // render) — wired once; the model is swapped per draft.
+        setupNativeEditor()
+
+        // Back: close the drawer first; from jobs, return home.
+        // The editor lives inline at the bottom of the home page —
+        // there is no separate editor view to leave.
         // (Object form, not the lambda overload — that lives in
         // activity-ktx, which this app does not depend on.)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -206,12 +207,6 @@ class MainActivity : AppCompatActivity() {
                 when {
                     binding.drawerLayout.isDrawerOpen(GravityCompat.START) ->
                         binding.drawerLayout.closeDrawer(GravityCompat.START)
-                    // The editor lives inline at the bottom of the home
-                    // page now — there is no separate editor view to
-                    // leave, so Back only goes back inside the WebView.
-                    binding.editorSection.visibility == View.VISIBLE &&
-                        binding.editorWebView.canGoBack() ->
-                        binding.editorWebView.goBack()
                     binding.jobsView.visibility == View.VISIBLE ->
                         showHome()
                     else -> {
@@ -227,17 +222,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         flowJob?.cancel()
+        editorRenderJob?.cancel()
         releasePlayer()
-        fileChooserCallback?.onReceiveValue(null)
-        fileChooserCallback = null
-        if (isFinishing && webViewSetupDone) {
-            // The server is a singleton; stopping it here frees the
-            // port when the app is really closed (rotation keeps it —
-            // the manifest holds configChanges for this activity).
-            (binding.editorWebView.parent as? ViewGroup)?.removeView(binding.editorWebView)
-            try { binding.editorWebView.destroy() } catch (_: Exception) {}
-            LocalApiServer.stopServer()
-        }
+        releaseEditorPlayer()
         super.onDestroy()
     }
 
@@ -261,31 +248,23 @@ class MainActivity : AppCompatActivity() {
         rebuildJobsList()
     }
 
-    /** Show the editor inline at the bottom of the home page and load
-     *  the draft (?draft= draft id, ?call= Modal call id, ?name= song
-     *  title). The server seeds those into localStorage before
-     *  editor.js runs, so the editor's own resume logic picks the
-     *  draft up and shows the waveform + word regions. The toolbar
-     *  title stays "KaraokeGen" — this is the same page, not a new
-     *  one. Re-opening the same draft AND call does not reload the
-     *  page, so in-progress edits in the editor survive switching
-     *  views. A previous job opened from the Jobs list passes an
-     *  EMPTY call id (resume by draft only — see LocalApiServer):
-     *  the old call id is stale, and the editor's alive-check on
-     *  /api/jobs/<callId> treats any fetch failure as a dead job
-     *  and wipes it, so a finished job must not depend on it. */
-    private fun showEditor(draftJobId: String, callId: String, songTitle: String) {
-        if (!webViewSetupDone) {
-            setupEditorWebView()
-            webViewSetupDone = true
+    /** Show the native editor inline at the bottom of the home
+     *  page and load the draft. The toolbar title stays "KaraokeGen"
+     *  — this is the same page, not a new one. Re-opening the same
+     *  draft does not reload, so in-progress edits survive switching
+     *  views. A Jobs tap clears loadedEditorDraft first (see
+     *  rebuildJobsList) so tapping a job always reloads it. */
+    private fun showEditor(draftJobId: String, songTitle: String) {
+        if (draftJobId == loadedEditorDraft && editorAlignment != null) {
+            // Already loaded — just reveal and scroll to it.
+            revealEditorSection()
+            return
         }
-        if (draftJobId != loadedEditorDraft || callId != loadedEditorCall) {
-            loadEditor(draftJobId, callId, songTitle)
-            loadedEditorDraft = draftJobId
-            loadedEditorCall = callId
-        }
-        // Back on the home page (the editor is part of it), reveal the
-        // editor section, then scroll the page down to it.
+        loadNativeEditor(draftJobId, songTitle)
+        revealEditorSection()
+    }
+
+    private fun revealEditorSection() {
         binding.jobsView.visibility = View.GONE
         binding.homeView.visibility = View.VISIBLE
         binding.toolbar.title = getString(R.string.app_name)
@@ -296,139 +275,729 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadEditor(draftJobId: String, callId: String, songTitle: String) {
+    /**
+     * Load a draft into the native editor: fetch the DraftResult
+     * (alignment + duration), download the vocals WAV for the
+     * waveform + playback, decode the waveform peaks, and populate
+     * the UI. Never crashes on a missing draft or failed audio —
+     * it shows a clear status instead.
+     */
+    private fun loadNativeEditor(draftJobId: String, songTitle: String) {
+        editorRenderJob?.cancel()
+        releaseEditorPlayer()
+        editorUndoStack.clear()
+        editorSelected = null
+        editorPeaks = null
+        editorDraftJobId = draftJobId
+        editorSongTitle = songTitle
+        loadedEditorDraft = draftJobId
+        binding.editorSongTitle.text = songTitle
+        binding.editorStatus.visibility = View.GONE
+        binding.editorRenderStatus.visibility = View.GONE
+        binding.editorDownloadButton.visibility = View.GONE
+        binding.editorRenderButton.isEnabled = false
         binding.editorLoading.visibility = View.VISIBLE
-        val baseUrl = LocalApiServer.start(this)
-        val editorUrl = Uri.parse(baseUrl).buildUpon().apply {
-            if (draftJobId.isNotEmpty()) appendQueryParameter("draft", draftJobId)
-            if (callId.isNotEmpty()) appendQueryParameter("call", callId)
-            if (songTitle.isNotEmpty()) appendQueryParameter("name", songTitle)
-        }.build().toString()
-        AppLog.d("Main", "loading editor: $baseUrl (draft=$draftJobId)")
-        binding.editorWebView.loadUrl(editorUrl)
+        binding.editorWaveform.setData(null, 0.0, emptyList())
+        binding.editorWordList.removeAllViews()
+        if (!SettingsStore.isConfigured(this)) {
+            binding.editorLoading.visibility = View.GONE
+            binding.editorStatus.text = "Set up your backend first."
+            binding.editorStatus.visibility = View.VISIBLE
+            return
+        }
+        val baseUrl = SettingsStore.getBaseUrl(this)
+        val apiKey = SettingsStore.getApiKey(this)
+        lifecycleScope.launch {
+            // 1. The alignment (segments/words + duration).
+            val result = withContext(Dispatchers.IO) {
+                ModalClient(baseUrl, apiKey).getDraftResultRaw(draftJobId)
+            }
+            val alignment = EditorAlignment.fromDraftResult(result)
+            if (alignment == null) {
+                binding.editorLoading.visibility = View.GONE
+                binding.editorStatus.text = getString(R.string.editor_no_alignment)
+                binding.editorStatus.visibility = View.VISIBLE
+                AppLog.e("Editor", "No alignment for draft $draftJobId")
+                return@launch
+            }
+            editorAlignment = alignment
+            // 2. The vocals WAV (waveform + playback). Fall back to
+            // the original downloaded song when it can't be fetched.
+            val vocalsFile = withContext(Dispatchers.IO) {
+                downloadVocalsWav(baseUrl, apiKey, draftJobId)
+            }
+            val audioFile = vocalsFile
+                ?: cachedSendFile?.takeIf { it.exists() }
+            var peaks: FloatArray? = null
+            if (audioFile != null) {
+                val decoded = withContext(Dispatchers.IO) {
+                    AudioDecode.decode(audioFile)
+                }
+                if (decoded != null) {
+                    peaks = AudioDecode.computePeaks(decoded.samples, 1500)
+                }
+            }
+            editorPeaks = peaks
+            // 3. The editor's own MediaPlayer (separate from the
+            // homepage player).
+            if (audioFile != null) {
+                setupEditorPlayer(audioFile)
+            }
+            // 4. Populate the UI.
+            binding.editorLoading.visibility = View.GONE
+            editorWindowStart = 0.0
+            editorWindowDuration = alignment.duration
+            binding.editorZoomBar.progress = 0
+            syncWaveform()
+            rebuildWordList()
+            binding.editorRenderButton.isEnabled = true
+            if (audioFile == null) {
+                binding.editorStatus.text = getString(R.string.editor_no_audio)
+                binding.editorStatus.visibility = View.VISIBLE
+            }
+            AppLog.d(
+                "Editor",
+                "Loaded draft $draftJobId: ${alignment.lines.size} lines"
+            )
+        }
     }
 
-    /** The editor WebView, moved here from the old separate editor
-     *  screen (deleted in v0.2.6 — the editor now lives on this page):
-     *  links stay in-app, external links open in the browser, the
-     *  file chooser is bridged to the document picker, and MP4
-     *  downloads go to DownloadManager in Downloads. */
-    private fun setupEditorWebView() {
-        val webView = binding.editorWebView
-        webView.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true // localStorage: job list, alignment edits
-            databaseEnabled = true // IndexedDB: cached audio blobs
-            allowFileAccess = true
-            allowContentAccess = true
-            mediaPlaybackRequiresUserGesture = false
-            cacheMode = WebSettings.LOAD_DEFAULT
-        }
-        webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(
-                view: WebView, request: WebResourceRequest
-            ): Boolean {
-                // Keep every link inside the editor (external links open
-                // in the browser instead).
-                val url = request.url.toString()
-                return if (url.startsWith("http://127.0.0.1")) {
-                    false
-                } else {
-                    try {
-                        startActivity(Intent(Intent.ACTION_VIEW, request.url))
-                    } catch (_: Exception) {
-                    }
-                    true
-                }
+    /** Download /vocals-raw/<draftId> (a WAV) to the cache dir.
+     *  Returns null on any failure — the caller falls back. */
+    private fun downloadVocalsWav(
+        baseUrl: String, apiKey: String, draftJobId: String
+    ): File? {
+        return try {
+            val client = ModalClient(baseUrl, apiKey)
+            val file = File(cacheDir, "vocals-$draftJobId.wav")
+            client.openStream("/vocals-raw/$draftJobId").use { input ->
+                file.outputStream().use { out -> input.copyTo(out) }
             }
+            if (file.exists() && file.length() > 0) file else null
+        } catch (e: Exception) {
+            AppLog.e("Editor", "Vocals download failed: ${e.message}")
+            null
+        }
+    }
 
-            override fun onPageFinished(view: WebView, url: String) {
-                binding.editorLoading.visibility = View.GONE
-                // Size the WebView to its content (see resizeEditorWebView).
-                // The editor reveals its edit/render sections dynamically
-                // once the draft loads, so re-measure after they appear.
-                resizeEditorWebView()
-                view.postDelayed({ resizeEditorWebView() }, 2000)
-                view.postDelayed({ resizeEditorWebView() }, 5000)
+    /** Push the current alignment into the waveform view (peaks,
+     *  words, window, selection, playhead). */
+    private fun syncWaveform() {
+        val alignment = editorAlignment ?: return
+        val waveWords = alignment.flatWords().map { (li, wi, w) ->
+            WaveformView.WaveWord(li, wi, w.text, w.start, w.end)
+        }
+        binding.editorWaveform.setData(editorPeaks, alignment.duration, waveWords)
+        binding.editorWaveform.selected = editorSelected
+        binding.editorWaveform.currentWord = currentWordAt(editorPlayheadSec())
+        binding.editorWaveform.setWindow(editorWindowStart, editorWindowDuration)
+        binding.editorWaveform.playheadSec = editorPlayheadSec()
+    }
+
+    private fun editorPlayheadSec(): Double {
+        val mp = editorPlayer ?: return -1.0
+        return mp.currentPosition / 1000.0
+    }
+
+    /** The word playing at `time`, or null. */
+    private fun currentWordAt(time: Double): WordRef? {
+        if (time < 0) return null
+        val alignment = editorAlignment ?: return null
+        for ((li, wi, w) in alignment.flatWords()) {
+            if (time >= w.start && time < w.end) return WordRef(li, wi)
+        }
+        return null
+    }
+
+    /** Push a deep copy onto the undo stack (before an edit). */
+    private fun pushEditorUndo() {
+        val alignment = editorAlignment ?: return
+        editorUndoStack.addLast(alignment.deepCopy())
+        if (editorUndoStack.size > 50) editorUndoStack.removeFirst()
+        binding.editorUndoButton.isEnabled = true
+    }
+
+    private fun undoEditorEdit() {
+        val previous = editorUndoStack.pollLast() ?: return
+        editorAlignment = previous
+        editorSelected = null
+        binding.editorUndoButton.isEnabled = editorUndoStack.isNotEmpty()
+        syncWaveform()
+        rebuildWordList()
+        AppLog.d("Editor", "Undo — ${editorUndoStack.size} left")
+    }
+
+    /** Wire the native editor controls (called once from onCreate).
+     *  The waveform callbacks read the live model, so they are set
+     *  once here — the model is swapped when a new draft loads. */
+    private fun setupNativeEditor() {
+        val wave = binding.editorWaveform
+        wave.onWordTap = { ref ->
+            editorSelected = ref
+            syncWaveform()
+            refreshChipHighlights()
+            // Seek the playhead to the word's start so Play starts there.
+            val word = editorAlignment?.wordAt(ref)
+            if (word != null) seekEditorTo(word.start)
+        }
+        wave.onSeekTo = { time ->
+            seekEditorTo(time)
+        }
+        wave.onWordDragStart = {
+            pushEditorUndo()
+        }
+        wave.onWordChanged = { ref, newStart, newEnd ->
+            val word = editorAlignment?.wordAt(ref)
+            if (word != null) {
+                word.start = newStart
+                word.end = newEnd
+            }
+            // The waveform already redraws itself; the word list
+            // shows no times, so it needs no rebuild mid-drag.
+        }
+        wave.onWordDragEnd = {
+            rebuildWordList()
+        }
+        binding.editorZoomBar.setOnSeekBarChangeListener(
+            object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(
+                    seekBar: SeekBar?, progress: Int, fromUser: Boolean
+                ) {
+                    if (!fromUser) return
+                    val alignment = editorAlignment ?: return
+                    val duration = alignment.duration
+                    if (duration <= 0) return
+                    // progress 0 = whole song; 100 = a 10s window (or
+                    // the whole song when it is shorter than that).
+                    val minWindow = minOf(10.0, duration)
+                    val window = duration - (duration - minWindow) * progress / 100.0
+                    val centre = editorPlayheadSec().let {
+                        if (it >= 0) it else editorWindowStart + editorWindowDuration / 2
+                    }
+                    val start = (centre - window / 2)
+                        .coerceIn(0.0, maxOf(0.0, duration - window))
+                    editorWindowStart = start
+                    editorWindowDuration = window
+                    binding.editorWaveform.setWindow(start, window)
+                }
+
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            }
+        )
+        binding.editorPlayButton.setOnClickListener { onEditorPlayPause() }
+        binding.editorPrevButton.setOnClickListener { editorJumpLine(-1) }
+        binding.editorNextButton.setOnClickListener { editorJumpLine(1) }
+        binding.editorAddLineButton.setOnClickListener { addEditorLine() }
+        binding.editorUndoButton.setOnClickListener { undoEditorEdit() }
+        binding.editorRenderButton.setOnClickListener { onRenderTapped() }
+        binding.editorDownloadButton.setOnClickListener { downloadRenderedMp4() }
+    }
+
+    // ------------------------------------------------------------------
+    // Native editor: word list (chips), playback, render.
+    // ------------------------------------------------------------------
+
+    /** Rebuild the word chips from the model. Each line is a row:
+     *  a wrapping flow of word chips + a delete-line button. */
+    private fun rebuildWordList() {
+        val alignment = editorAlignment
+        val container = binding.editorWordList
+        container.removeAllViews()
+        editorChipViews.clear()
+        if (alignment == null) return
+        val density = resources.displayMetrics.density
+        val chipPadH = (10 * density).toInt()
+        val chipPadV = (6 * density).toInt()
+        for ((li, line) in alignment.lines.withIndex()) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            val flow = FlowLayout(this@MainActivity).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+                )
+            }
+            for ((wi, word) in line.words.withIndex()) {
+                val ref = WordRef(li, wi)
+                val chip = TextView(this@MainActivity).apply {
+                    text = word.text.ifEmpty { "…" }
+                    textSize = 15f
+                    setPadding(chipPadH, chipPadV, chipPadH, chipPadV)
+                    setTextColor(getColor(R.color.kg_text))
+                    setOnClickListener {
+                        editorSelected = ref
+                        syncWaveform()
+                        refreshChipHighlights()
+                        playEditorWord(ref)
+                    }
+                    setOnLongClickListener {
+                        editorSelected = ref
+                        syncWaveform()
+                        refreshChipHighlights()
+                        editEditorWord(ref)
+                        true
+                    }
+                }
+                editorChipViews[ref] = chip
+                flow.addView(chip)
+            }
+            row.addView(flow)
+            val del = TextView(this@MainActivity).apply {
+                text = "✕"
+                textSize = 18f
+                setPadding(chipPadH, chipPadV, chipPadH, chipPadV)
+                setTextColor(getColor(R.color.kg_error))
+                setOnClickListener { deleteEditorLine(li) }
+            }
+            row.addView(del)
+            container.addView(row)
+        }
+        refreshChipHighlights()
+        binding.editorUndoButton.isEnabled = editorUndoStack.isNotEmpty()
+    }
+
+    /** Set each chip's background from its state: selected (solid
+     *  blue), currently playing (darker blue + white border), or
+     *  plain (panel + border). Cheap — no rebuild. */
+    private fun refreshChipHighlights() {
+        for ((ref, chip) in editorChipViews) {
+            val selected = ref == editorSelected
+            val current = ref == editorCurrentWord
+            chip.background = chipBackground(selected, current)
+        }
+    }
+
+    private fun chipBackground(selected: Boolean, current: Boolean): GradientDrawable {
+        val density = resources.displayMetrics.density
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 8f * density
+            when {
+                selected -> setColor(getColor(R.color.kg_primary))
+                current -> {
+                    setColor(getColor(R.color.kg_primary_dark))
+                    setStroke(
+                        (1 * density).toInt(), getColor(android.R.color.white)
+                    )
+                }
+                else -> {
+                    setColor(getColor(R.color.kg_panel))
+                    setStroke(
+                        (1 * density).toInt(), getColor(R.color.kg_border)
+                    )
+                }
             }
         }
-        webView.webChromeClient = object : WebChromeClient() {
-            override fun onShowFileChooser(
-                view: WebView,
-                filePathCallback: ValueCallback<Array<Uri>>,
-                fileChooserParams: FileChooserParams
-            ): Boolean {
-                fileChooserCallback?.onReceiveValue(null)
-                fileChooserCallback = filePathCallback
-                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
-                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/*", "video/*"))
-                }
-                return try {
-                    fileChooserLauncher.launch(intent)
-                    true
-                } catch (e: Exception) {
-                    fileChooserCallback = null
-                    false
+    }
+
+    private fun addEditorLine() {
+        val alignment = editorAlignment ?: return
+        pushEditorUndo()
+        // A placeholder word at the end the user fills in (long-press
+        // the chip to edit its text, drag it on the waveform to place
+        // it). Blank words are dropped when the render JSON is built.
+        val lastEnd = alignment.flatWords()
+            .maxOfOrNull { it.third.end } ?: 0.0
+        val start = lastEnd
+        val end = minOf(alignment.duration, lastEnd + 1.0)
+            .let { if (it <= start) start else it }
+        alignment.lines.add(
+            EditorLine(mutableListOf(EditorWord("", start, end)))
+        )
+        syncWaveform()
+        rebuildWordList()
+    }
+
+    private fun deleteEditorLine(lineIndex: Int) {
+        val alignment = editorAlignment ?: return
+        if (lineIndex !in alignment.lines.indices) return
+        pushEditorUndo()
+        alignment.lines.removeAt(lineIndex)
+        if (editorSelected?.line == lineIndex) editorSelected = null
+        syncWaveform()
+        rebuildWordList()
+    }
+
+    /** Long-press a word chip to fix its wording. */
+    private fun editEditorWord(ref: WordRef) {
+        val alignment = editorAlignment ?: return
+        val word = alignment.wordAt(ref) ?: return
+        val input = EditText(this).apply {
+            setText(word.text)
+            setSelection(word.text.length)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.editor_edit_word)
+            .setView(input)
+            .setPositiveButton(R.string.editor_save) { _, _ ->
+                val newText = input.text?.toString()?.trim().orEmpty()
+                if (newText.isNotEmpty() && newText != word.text) {
+                    pushEditorUndo()
+                    word.text = newText
+                    syncWaveform()
+                    rebuildWordList()
                 }
             }
+            .setNegativeButton(R.string.editor_cancel, null)
+            .show()
+    }
+
+    // ------------------------------------------------------------------
+    // Native editor: playback (vocals WAV, separate from the homepage
+    // player). The ticker moves the playhead, highlights the current
+    // word and follows it on the waveform.
+    // ------------------------------------------------------------------
+
+    private fun setupEditorPlayer(file: File) {
+        releaseEditorPlayer()
+        editorPlayerFile = file
+        try {
+            val mp = MediaPlayer()
+            mp.setDataSource(file.path)
+            mp.prepare()
+            editorPlayer = mp
+            mp.setOnCompletionListener {
+                editorPlayWordEnd = null
+                binding.editorPlayButton.text = getString(R.string.player_play)
+                stopEditorTicker()
+                binding.editorWaveform.playheadSec = -1.0
+                binding.editorWaveform.currentWord = null
+                editorCurrentWord = null
+                binding.editorWaveform.invalidate()
+                refreshChipHighlights()
+                updateEditorTimeLabel()
+            }
+        } catch (e: Exception) {
+            AppLog.e("Editor", "Editor player failed: ${e.message}")
+            editorPlayer = null
         }
-        webView.setDownloadListener { url, _, contentDisposition, mimetype, _ ->
-            // The editor's Download button (MP4) — and the lyric-video
-            // link — land here as a localhost /api/file/<id> URL.
+        updateEditorTimeLabel()
+    }
+
+    private fun onEditorPlayPause() {
+        val mp = editorPlayer ?: return
+        if (mp.isPlaying) {
+            mp.pause()
+            editorPlayWordEnd = null
+            binding.editorPlayButton.text = getString(R.string.player_play)
+            stopEditorTicker()
+        } else {
+            // At the end — restart from the top.
+            if (mp.currentPosition >= mp.duration - 200) mp.seekTo(0)
+            editorPlayWordEnd = null
+            mp.start()
+            binding.editorPlayButton.text = getString(R.string.player_pause)
+            startEditorTicker()
+        }
+        updateEditorTimeLabel()
+    }
+
+    /** Play JUST this word: seek to its start, stop at its end. */
+    private fun playEditorWord(ref: WordRef) {
+        val word = editorAlignment?.wordAt(ref) ?: return
+        val mp = editorPlayer ?: return
+        editorPlayWordEnd = word.end
+        mp.seekTo((word.start * 1000).toInt().coerceIn(0, mp.duration))
+        if (!mp.isPlaying) {
+            mp.start()
+            binding.editorPlayButton.text = getString(R.string.player_pause)
+            startEditorTicker()
+        }
+    }
+
+    private fun seekEditorTo(seconds: Double) {
+        val mp = editorPlayer ?: return
+        val ms = (seconds * 1000).toInt().coerceIn(0, mp.duration)
+        mp.seekTo(ms)
+        binding.editorWaveform.playheadSec = seconds
+        binding.editorWaveform.currentWord = currentWordAt(seconds)
+        editorCurrentWord = currentWordAt(seconds)
+        binding.editorWaveform.ensureVisible(seconds)
+        editorWindowStart = binding.editorWaveform.windowStart
+        binding.editorWaveform.invalidate()
+        refreshChipHighlights()
+        updateEditorTimeLabel()
+    }
+
+    /** Jump to the previous/next LINE's first word. */
+    private fun editorJumpLine(direction: Int) {
+        val alignment = editorAlignment ?: return
+        if (alignment.lines.isEmpty()) return
+        val pos = editorPlayheadSec().let { if (it < 0) 0.0 else it }
+        var currentLine = 0
+        for ((li, _, w) in alignment.flatWords()) {
+            if (w.start <= pos) currentLine = li
+        }
+        val target = (currentLine + direction)
+            .coerceIn(0, alignment.lines.size - 1)
+        val first = alignment.lines[target].words.firstOrNull() ?: return
+        editorSelected = WordRef(target, 0)
+        syncWaveform()
+        refreshChipHighlights()
+        seekEditorTo(first.start)
+    }
+
+    private fun startEditorTicker() {
+        stopEditorTicker()
+        editorTicker = lifecycleScope.launch {
+            while (true) {
+                delay(100)
+                val mp = editorPlayer ?: break
+                if (!mp.isPlaying) break
+                val posSec = mp.currentPosition / 1000.0
+                // End of a "play just this word" request — stop.
+                val endAt = editorPlayWordEnd
+                if (endAt != null && posSec >= endAt) {
+                    mp.pause()
+                    editorPlayWordEnd = null
+                    binding.editorPlayButton.text = getString(R.string.player_play)
+                    stopEditorTicker()
+                    break
+                }
+                binding.editorWaveform.playheadSec = posSec
+                val cur = currentWordAt(posSec)
+                if (cur != editorCurrentWord) {
+                    editorCurrentWord = cur
+                    binding.editorWaveform.currentWord = cur
+                    refreshChipHighlights()
+                }
+                binding.editorWaveform.ensureVisible(posSec)
+                editorWindowStart = binding.editorWaveform.windowStart
+                binding.editorWaveform.invalidate()
+                updateEditorTimeLabel()
+            }
+        }
+    }
+
+    private fun stopEditorTicker() {
+        editorTicker?.cancel()
+        editorTicker = null
+    }
+
+    private fun releaseEditorPlayer() {
+        stopEditorTicker()
+        editorPlayerFile = null
+        editorPlayWordEnd = null
+        editorCurrentWord = null
+        editorPlayer?.let { runCatching { it.release() } }
+        editorPlayer = null
+    }
+
+    private fun updateEditorTimeLabel() {
+        val mp = editorPlayer
+        val pos = if (mp != null) mp.currentPosition / 1000 else 0
+        val dur = editorAlignment?.duration?.toLong()
+            ?: if (mp != null) (mp.duration / 1000).toLong() else 0
+        binding.editorTimeLabel.text =
+            "${formatDuration(pos.toLong())} / ${formatDuration(dur)}"
+    }
+
+    // ------------------------------------------------------------------
+    // Native editor: render MP4 (POST /render-word, poll, download).
+    // ------------------------------------------------------------------
+
+    private fun selectedBgColor(): String {
+        return when {
+            binding.editorBgNavy.isChecked -> "#14142A"
+            binding.editorBgWhite.isChecked -> "#FFFFFF"
+            else -> "#000000"
+        }
+    }
+
+    private fun onRenderTapped() {
+        val alignment = editorAlignment ?: return
+        if (editorDraftJobId.isEmpty()) return
+        if (!SettingsStore.isConfigured(this)) {
+            binding.editorRenderStatus.text = "Set up your backend first."
+            binding.editorRenderStatus.visibility = View.VISIBLE
+            return
+        }
+        val baseUrl = SettingsStore.getBaseUrl(this)
+        val apiKey = SettingsStore.getApiKey(this)
+        val outputName = editorSongTitle
+            .replace(Regex("[^A-Za-z0-9._-]+"), "_")
+            .take(64)
+            .ifEmpty { editorDraftJobId }
+        // Same body shape as the desktop editor's startRender():
+        // draft id, the CURRENT edited alignment, final lyrics,
+        // background colour, output name. /render-word forces
+        // word_level=true + highlight=word server-side.
+        val body = JSONObject().apply {
+            put("draft_job_id", editorDraftJobId)
+            put("alignment", alignment.toAlignmentJson())
+            put("final_lyrics", alignment.finalLyrics())
+            put("bg_color", selectedBgColor())
+            put("output_name", outputName)
+            put("second_voice", false)
+            put("second_voice_gain", 1.0)
+        }
+        binding.editorRenderButton.isEnabled = false
+        binding.editorDownloadButton.visibility = View.GONE
+        editorRenderFileId = null
+        binding.editorRenderStatus.text = "Rendering on Modal…"
+        binding.editorRenderStatus.visibility = View.VISIBLE
+        editorRenderJob = lifecycleScope.launch {
             try {
-                val fileName = URLUtil.guessFileName(url, contentDisposition, mimetype)
-                val req = DownloadManager.Request(Uri.parse(url))
-                    .setMimeType(mimetype)
-                    .setNotificationVisibility(
-                        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
-                    )
-                    .setDestinationInExternalPublicDir(
-                        Environment.DIRECTORY_DOWNLOADS, fileName
-                    )
-                val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                dm.enqueue(req)
-                AppLog.d("Editor", "download started: $fileName")
-                Toast.makeText(
-                    this, "Downloading $fileName to Downloads…",
-                    Toast.LENGTH_SHORT
-                ).show()
+                val submitted = withContext(Dispatchers.IO) {
+                    ModalClient(baseUrl, apiKey).submitRender(body, wordLevel = true)
+                }
+                val renderCallId = submitted.optString("job_id")
+                if (renderCallId.isEmpty()) {
+                    throw ModalError("Backend reply was missing the render job id.")
+                }
+                AppLog.d("Editor", "Render submitted: job=$renderCallId")
+                var failedPolls = 0
+                while (true) {
+                    delay(3000)
+                    val job = try {
+                        withContext(Dispatchers.IO) {
+                            ModalClient(baseUrl, apiKey).getJob(renderCallId)
+                        }
+                    } catch (e: IOException) {
+                        failedPolls++
+                        if (failedPolls >= 10) {
+                            throw IOException("Lost connection while rendering.")
+                        }
+                        continue
+                    }
+                    failedPolls = 0
+                    val progress = withContext(Dispatchers.IO) {
+                        ModalClient(baseUrl, apiKey)
+                            .getProgressRaw(editorDraftJobId, render = true)
+                    }
+                    if (progress != null) {
+                        val stage = progress.optString("stage")
+                        val pct = progress.optInt("pct")
+                        binding.editorRenderStatus.text = if (stage.isNotEmpty()) {
+                            "Rendering… $stage — $pct%"
+                        } else {
+                            "Rendering… $pct%"
+                        }
+                    }
+                    when (job.status) {
+                        "done" -> {
+                            val result = job.result
+                            val fileId = result?.optString("file_id").orEmpty()
+                            val filename = result?.optString("filename")
+                                .orEmpty().ifEmpty { "karaoke.mp4" }
+                            if (fileId.isEmpty()) {
+                                throw ModalError("Render finished but sent no file.")
+                            }
+                            editorRenderFileId = fileId
+                            editorRenderFilename = filename
+                            binding.editorRenderStatus.text =
+                                "Render complete — tap Download MP4."
+                            binding.editorDownloadButton.text =
+                                "${getString(R.string.editor_download)} — $filename"
+                            binding.editorDownloadButton.visibility = View.VISIBLE
+                            break
+                        }
+                        "error" -> {
+                            val detail = job.error.ifBlank { "no detail from backend" }
+                            throw ModalError(detail)
+                        }
+                        else -> { /* still pending */ }
+                    }
+                }
+            } catch (e: ModalError) {
+                AppLog.e("Editor", "Render failed: ${e.message}")
+                binding.editorRenderStatus.text =
+                    getString(R.string.editor_render_failed, e.message ?: "Backend error.")
+            } catch (e: IOException) {
+                AppLog.e("Editor", "Render failed: ${e.message}")
+                binding.editorRenderStatus.text =
+                    getString(R.string.editor_render_failed, e.message ?: "No connection.")
             } catch (e: Exception) {
-                AppLog.e("Editor", "download failed: ${e.message}")
-                Toast.makeText(
-                    this, "Download failed: ${e.message}",
-                    Toast.LENGTH_LONG
-                ).show()
+                AppLog.e("Editor", "Render failed: ${e.message}")
+                binding.editorRenderStatus.text =
+                    getString(R.string.editor_render_failed, e.message ?: "Something went wrong.")
+            } finally {
+                binding.editorRenderButton.isEnabled = true
+            }
+        }
+    }
+
+    /** Download the rendered MP4 (GET /files/<id>) into Downloads. */
+    private fun downloadRenderedMp4() {
+        val fileId = editorRenderFileId ?: return
+        val filename = editorRenderFilename ?: "karaoke.mp4"
+        if (!SettingsStore.isConfigured(this)) return
+        val baseUrl = SettingsStore.getBaseUrl(this)
+        val apiKey = SettingsStore.getApiKey(this)
+        binding.editorDownloadButton.isEnabled = false
+        binding.editorRenderStatus.text = "Downloading $filename…"
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val client = ModalClient(baseUrl, apiKey)
+                val uri = saveStreamToDownloads(client, fileId, filename)
+                withContext(Dispatchers.Main) {
+                    if (uri != null) {
+                        binding.editorRenderStatus.text =
+                            getString(R.string.editor_saved, filename)
+                        AppLog.d("Editor", "MP4 saved to Downloads: $filename")
+                    } else {
+                        binding.editorRenderStatus.text =
+                            getString(R.string.editor_render_failed, "Couldn't save the file.")
+                    }
+                    binding.editorDownloadButton.isEnabled = true
+                }
+            } catch (e: Exception) {
+                AppLog.e("Editor", "MP4 download failed: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    binding.editorRenderStatus.text =
+                        getString(R.string.editor_render_failed, e.message ?: "Download failed.")
+                    binding.editorDownloadButton.isEnabled = true
+                }
             }
         }
     }
 
     /**
-     * Size the editor WebView to its full content height so the outer
-     * ScrollView does the scrolling (one page). The editor page is
-     * taller than the screen; a fixed-height WebView would scroll
-     * inside itself and fight the page. scrollHeight is CSS px —
-     * multiply by the display density for Android px. A failed or
-     * empty result keeps the current (fallback) height.
+     * Stream [client.openStream] into the public Downloads folder.
+     * MediaStore on Android 10+ (no storage permission needed);
+     * the legacy public dir below that. Returns the saved Uri, or
+     * null on failure.
      */
-    private fun resizeEditorWebView() {
-        val webView = binding.editorWebView
-        webView.evaluateJavascript(
-            "(function(){return document.documentElement.scrollHeight " +
-            "|| document.body.scrollHeight || 0})()"
-        ) { raw ->
-            val cssPx = raw?.trim()?.trim('"')?.toDoubleOrNull()
-            if (cssPx == null || cssPx <= 0) return@evaluateJavascript
-            val density = resources.displayMetrics.density
-            val px = (cssPx * density).toInt()
-            val minPx = (600 * density).toInt()
-            val height = if (px < minPx) minPx else px
-            val params = webView.layoutParams
-            if (params.height != height) {
-                params.height = height
-                webView.layoutParams = params
+    private fun saveStreamToDownloads(
+        client: ModalClient, fileId: String, filename: String
+    ): android.net.Uri? {
+        return try {
+            if (android.os.Build.VERSION.SDK_INT >=
+                android.os.Build.VERSION_CODES.Q
+            ) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, filename)
+                    put(MediaStore.Downloads.MIME_TYPE, "video/mp4")
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+                val uri = contentResolver.insert(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
+                ) ?: return null
+                contentResolver.openOutputStream(uri)?.use { out ->
+                    client.openStream("/files/$fileId").use { input ->
+                        input.copyTo(out)
+                    }
+                }
+                uri
+            } else {
+                @Suppress("DEPRECATION")
+                val dir = Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS
+                )
+                if (!dir.exists()) dir.mkdirs()
+                val file = File(dir, filename)
+                file.outputStream().use { out ->
+                    client.openStream("/files/$fileId").use { input ->
+                        input.copyTo(out)
+                    }
+                }
+                android.net.Uri.fromFile(file)
             }
+        } catch (e: Exception) {
+            AppLog.e("Editor", "Save to Downloads failed: ${e.message}")
+            null
         }
     }
 
@@ -462,17 +1031,11 @@ class MainActivity : AppCompatActivity() {
                 )
                 setBackgroundResource(outValue.resourceId)
                 setOnClickListener {
-                    // Open a PREVIOUS job by draft only (empty call
-                    // id). The old call id is stale — the editor's
-                    // alive-check on /api/jobs/<callId> treats any
-                    // fetch failure as a dead job and wipes it, so a
-                    // finished job is resumed from the persistent
-                    // draft result instead (see LocalApiServer).
-                    // Force a reload even for the same job, so a
-                    // re-tap retries after a failed load.
+                    // Open a PREVIOUS job: force a reload even for
+                    // the same draft, so a re-tap retries after a
+                    // failed load.
                     loadedEditorDraft = null
-                    loadedEditorCall = null
-                    showEditor(job.draftJobId, "", job.title)
+                    showEditor(job.draftJobId, job.title)
                 }
             }
             val titleView = TextView(this).apply {
@@ -1027,7 +1590,7 @@ class MainActivity : AppCompatActivity() {
         // Past the lyric-fixing step now — the player hides again.
         playerRevealAllowed = false
         binding.audioPlayer.visibility = View.GONE
-        showEditor(draftJobId, callId, songTitle)
+        showEditor(draftJobId, songTitle)
     }
 
     private fun onCancel() {

@@ -34,6 +34,29 @@
 
     <string name="draft_ready_title">Draft ready</string>
 
+    <string name="editor_zoom">Zoom</string>
+    <string name="editor_prev">◀ Prev</string>
+    <string name="editor_next">Next ▶</string>
+    <string name="editor_words_hint">Words — tap a word to play just it, long-press it to fix its text. Drag a word on the waveform to move it, or drag its edges to resize it.</string>
+    <string name="editor_add_line">+ Add line</string>
+    <string name="editor_undo">↩ Undo</string>
+    <string name="editor_render_title">Render karaoke MP4</string>
+    <string name="editor_bg_black">Black</string>
+    <string name="editor_bg_navy">Navy</string>
+    <string name="editor_bg_white">White</string>
+    <string name="editor_render">Render MP4</string>
+    <string name="editor_download">Download MP4</string>
+    <string name="editor_loading">Loading the editor…</string>
+    <string name="editor_no_alignment">Couldn’t load this draft’s timings — try running it again.</string>
+    <string name="editor_no_audio">Vocals audio isn’t available — the timings are still editable.</string>
+    <string name="editor_saved">Saved to Downloads: %1$s</string>
+    <string name="editor_render_failed">Render failed: %1$s</string>
+    <string name="editor_edit_word">Fix this word</string>
+    <string name="editor_save">Save</string>
+    <string name="editor_cancel">Cancel</string>
+    <string name="editor_delete_line">Delete this line?</string>
+    <string name="editor_no_draft">Run a draft first.</string>
+
     <string name="nav_home">Home</string>
     <string name="nav_editor">Editor</string>
     <string name="nav_jobs">Jobs</string>

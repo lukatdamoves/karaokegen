@@ -11,12 +11,12 @@ android {
         applicationId = "com.lukatdamoves.karaokegen"
         minSdk = 26
         targetSdk = 35
-        versionCode = 33
+        versionCode = 34
         // v0.3.6: match desktop 2nd-voice checkbox + volume slider
         // (drop the BV dropdown).
         // Bump versionCode on EVERY release — the in-app updater
         // compares it against the APK asset on GitHub Releases.
-        versionName = "0.3.6-trial"
+        versionName = "0.3.7-trial"
     }
 
     // Release signing comes from CI-injected properties (see android/README.md).

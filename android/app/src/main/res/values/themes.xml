@@ -2,7 +2,7 @@
 <resources>
     <!-- Theme matches the KaraokeGen desktop app (local_app/static/style.css):
          dark navy background, blue primary, light text. -->
-    <style name="Theme.KaraokeGen" parent="Theme.Material3.DayNight.NoActionBar">
+    <style name="Theme.KaraokeGen" parent="Theme.Material3.Dark.NoActionBar">
         <item name="colorPrimary">@color/kg_primary</item>
         <item name="colorOnPrimary">#FFFFFF</item>
         <item name="colorPrimaryContainer">#23335C</item>

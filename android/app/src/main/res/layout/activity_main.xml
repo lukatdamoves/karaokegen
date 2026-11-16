@@ -550,6 +550,7 @@
                 <!-- Tappable words — scrollable, takes the remaining
                      space so the waveform stays pinned at the top. -->
                 <ScrollView
+                    android:id="@+id/editorWordScroll"
                     android:layout_width="match_parent"
                     android:layout_height="0dp"
                     android:layout_weight="1"

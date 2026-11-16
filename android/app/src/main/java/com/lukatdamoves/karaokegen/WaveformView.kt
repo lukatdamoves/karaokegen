@@ -234,17 +234,17 @@ class WaveformView @JvmOverloads constructor(
         val waveHalf = (waveBottom - waveTop) / 2f
 
         // Time ruler: ticks + labels, spaced so they don't crowd.
-        val step = when {
-            windowDuration <= 30 -> 1.0
-            windowDuration <= 120 -> 5.0
-            else -> 10.0
-        }
+        // Pick a step whose labels never collide at the current zoom.
+        val minGapPx = 64f * density
+        val step = listOf(1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0)
+            .firstOrNull { (it / windowDuration) * w >= minGapPx } ?: 300.0
+        rulerPaint.textAlign = Paint.Align.CENTER
         var t = (windowStart / step).toInt() * step
         if (t < windowStart) t += step
         while (t <= windowStart + windowDuration) {
             val x = timeToX(t)
             canvas.drawLine(x, rulerH - 10f * density, x, rulerH, tickPaint)
-            canvas.drawText(formatRuler(t), x + 3f * density, rulerH - 12f * density, rulerPaint)
+            canvas.drawText(formatRuler(t), x, rulerH - 12f * density, rulerPaint)
             t += step
         }
         // Ruler baseline.

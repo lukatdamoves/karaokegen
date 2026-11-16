@@ -63,6 +63,10 @@ class MainActivity : AppCompatActivity() {
 
     private var flowJob: Job? = null
     private var currentJobId: String? = null
+    private var userCancelled = false
+    private var editorFromJobs = false
+    private var renderLastPct = 0
+    private var draftWaitStart = 0L
     private var pendingUpdate: UpdateManager.UpdateInfo? = null
     // Last downloaded audio, so "Run alignment" (the follow-up /draft
     // after a transcript) reuses the file already on disk instead of
@@ -136,6 +140,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        restoreHomeForm()
 
         // Sidebar (hamburger in the toolbar).
         setSupportActionBar(binding.toolbar)
@@ -234,7 +239,7 @@ class MainActivity : AppCompatActivity() {
                     binding.jobsView.visibility == View.VISIBLE ->
                         showHome()
                     binding.editorView.visibility == View.VISIBLE ->
-                        showHome()
+                        leaveEditor()
                     else -> {
                         isEnabled = false
                         onBackPressedDispatcher.onBackPressed()
@@ -260,7 +265,15 @@ class MainActivity : AppCompatActivity() {
     // home form is hidden while editing, and shown again on Back.
     // ------------------------------------------------------------------
 
+    /** Leaving the editor returns to whichever screen opened it. */
+    private fun leaveEditor() {
+        val backToJobs = editorFromJobs
+        editorFromJobs = false
+        if (backToJobs) showJobs() else showHome()
+    }
+
     private fun showHome() {
+        editorFromJobs = false
         pauseEditorPlayback()
         binding.editorView.visibility = View.GONE
         binding.jobsView.visibility = View.GONE
@@ -344,6 +357,11 @@ class MainActivity : AppCompatActivity() {
         editorPeaks = null
         editorDraftJobId = draftJobId
         editorSongTitle = songTitle
+        binding.editorStatus.text = if (EditorCache.draftFile(this, draftJobId).exists()) {
+            "Loading cached draft…"
+        } else {
+            "Loading draft from the cloud…"
+        }
         loadedEditorDraft = draftJobId
         // Restore this draft's "2nd voice" choice + volume (or the
         // last choice for a new draft) and show them in the
@@ -665,6 +683,18 @@ class MainActivity : AppCompatActivity() {
         return null
     }
 
+    /** Save the current edited alignment so a later Jobs re-open or an
+     *  app restart gets the edits back, not the original alignment. */
+    private fun persistEditorEdits() {
+        val a = editorAlignment ?: return
+        val id = editorDraftJobId
+        if (id.isEmpty()) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            EditorCache.saveDraft(this@MainActivity, id, a)
+            AppLog.d("Editor", "Edits saved locally for $id")
+        }
+    }
+
     /** Push a deep copy onto the undo stack (before an edit). */
     private fun pushEditorUndo() {
         val alignment = editorAlignment ?: return
@@ -680,6 +710,7 @@ class MainActivity : AppCompatActivity() {
         binding.editorUndoButton.isEnabled = editorUndoStack.isNotEmpty()
         syncWaveform()
         rebuildWordList()
+        persistEditorEdits()
         AppLog.d("Editor", "Undo — ${editorUndoStack.size} left")
     }
 
@@ -687,7 +718,7 @@ class MainActivity : AppCompatActivity() {
      *  The waveform callbacks read the live model, so they are set
      *  once here — the model is swapped when a new draft loads. */
     private fun setupNativeEditor() {
-        binding.editorBackButton.setOnClickListener { showHome() }
+        binding.editorBackButton.setOnClickListener { leaveEditor() }
         val wave = binding.editorWaveform
         // Panning the waveform (dragging empty space) moves the time
         // window — keep the parent's window bookkeeping in sync so
@@ -721,6 +752,7 @@ class MainActivity : AppCompatActivity() {
         }
         wave.onWordDragEnd = {
             rebuildWordList()
+            persistEditorEdits()
         }
         binding.editorZoomBar.setOnSeekBarChangeListener(
             object : SeekBar.OnSeekBarChangeListener {
@@ -994,6 +1026,9 @@ class MainActivity : AppCompatActivity() {
         )
         syncWaveform()
         rebuildWordList()
+        persistEditorEdits()
+        binding.editorWordScroll.post { binding.editorWordScroll.fullScroll(View.FOCUS_DOWN) }
+        Toast.makeText(this, "Line added — scroll down to fill it in", Toast.LENGTH_SHORT).show()
     }
 
     private fun deleteEditorLine(lineIndex: Int) {
@@ -1004,6 +1039,7 @@ class MainActivity : AppCompatActivity() {
         if (editorSelected?.line == lineIndex) editorSelected = null
         syncWaveform()
         rebuildWordList()
+        persistEditorEdits()
     }
 
     /** Long-press a word chip to fix its wording. */
@@ -1024,6 +1060,8 @@ class MainActivity : AppCompatActivity() {
                     word.text = newText
                     syncWaveform()
                     rebuildWordList()
+                    persistEditorEdits()
+                    Toast.makeText(this@MainActivity, "Word saved", Toast.LENGTH_SHORT).show()
                 }
             }
             .setNegativeButton(R.string.editor_cancel, null)
@@ -1237,6 +1275,7 @@ class MainActivity : AppCompatActivity() {
             put("second_voice_gain", editorSvVolume / 100.0)
         }
         AppLog.d("Editor", "Render submitted with 2nd voice=$editorSvEnabled gain=${editorSvVolume / 100.0}")
+        renderLastPct = 0
         binding.editorRenderButton.isEnabled = false
         binding.editorDownloadButton.visibility = View.GONE
         editorRenderFileId = null
@@ -1272,13 +1311,12 @@ class MainActivity : AppCompatActivity() {
                             .getProgressRaw(editorDraftJobId, render = true)
                     }
                     if (progress != null) {
-                        val stage = progress.optString("stage")
-                        val pct = progress.optInt("pct")
-                        binding.editorRenderStatus.text = if (stage.isNotEmpty()) {
-                            "Rendering… $stage — $pct%"
-                        } else {
-                            "Rendering… $pct%"
-                        }
+                        // Progress endpoints sometimes report a stale
+                        // stage after a new render starts — never let
+                        // the displayed percentage go backwards.
+                        val pct = maxOf(renderLastPct, progress.optInt("pct"))
+                        renderLastPct = pct
+                        binding.editorRenderStatus.text = "Rendering… $pct%"
                     }
                     when (job.status) {
                         "done" -> {
@@ -1440,6 +1478,7 @@ class MainActivity : AppCompatActivity() {
                     // the same draft, so a re-tap retries after a
                     // failed load.
                     loadedEditorDraft = null
+                    editorFromJobs = true
                     showEditor(job.draftJobId, job.title)
                 }
             }
@@ -1473,7 +1512,14 @@ class MainActivity : AppCompatActivity() {
                 gravity = android.view.Gravity.CENTER
                 setPadding(pad, pad, pad, pad)
                 setTextColor(getColor(R.color.kg_error))
-                setOnClickListener { deleteJob(job) }
+                setOnClickListener {
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("Delete this job?")
+                        .setMessage("Its draft and cached edits will be removed. This cannot be undone.")
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .setPositiveButton("Delete") { _, _ -> deleteJob(job) }
+                        .show()
+                }
             }
             row.addView(del)
             binding.jobsList.addView(row)
@@ -1680,12 +1726,47 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------------
+    // Home form persistence (link/lyrics/options survive restarts).
+    // ------------------------------------------------------------------
+    private fun saveHomeForm() {
+        getSharedPreferences("karaokegen_form", MODE_PRIVATE).edit()
+            .putString("url", binding.urlInput.text?.toString()?.trim().orEmpty())
+            .putString("lyrics", binding.lyricsInput.text?.toString().orEmpty())
+            .putBoolean("ballad", binding.genreBallad.isChecked)
+            .putString("lang", when {
+                binding.langEnglish.isChecked -> "en"
+                binding.langAuto.isChecked -> "auto"
+                else -> "tl"
+            }).apply()
+    }
+
+    private fun restoreHomeForm() {
+        val pref = getSharedPreferences("karaokegen_form", MODE_PRIVATE)
+        binding.urlInput.setText(pref.getString("url", "").orEmpty())
+        binding.lyricsInput.setText(pref.getString("lyrics", "").orEmpty())
+        binding.genreBallad.isChecked = pref.getBoolean("ballad", false)
+        when (pref.getString("lang", "tl")) {
+            "en" -> binding.langEnglish.isChecked = true
+            "auto" -> binding.langAuto.isChecked = true
+            else -> binding.langTagalog.isChecked = true
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (binding.homeView.visibility == View.VISIBLE) saveHomeForm()
+    }
+
+    // ------------------------------------------------------------------
     // One Start button: link -> audio -> draft/transcribe -> result.
     // ------------------------------------------------------------------
 
     private fun showError(msg: String) {
         binding.errorText.text = msg
         binding.errorText.visibility = View.VISIBLE
+        // Errors used to sit below the fold — make them impossible to miss.
+        binding.errorText.post { binding.homeView.fullScroll(View.FOCUS_DOWN) }
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
     }
 
     private fun clearError() {
@@ -1703,6 +1784,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun onStartTapped() {
         val url = binding.urlInput.text?.toString()?.trim().orEmpty()
+        saveHomeForm()
+        userCancelled = false
+        draftWaitStart = System.currentTimeMillis()
         if (url.isEmpty()) {
             showError("Paste a YouTube link first.")
             return
@@ -1823,9 +1907,12 @@ class MainActivity : AppCompatActivity() {
                     append(formatDuration(resolved.durationSec))
                     append(" • ")
                     append(formatSize(sendFile.length()))
-                    append(" • ")
-                    append(resolved.bitrate / 1000)
-                    append(" kbps")
+                    if (resolved.bitrate > 0) {
+                        append(" • ")
+                        val kbps = resolved.bitrate / 1000
+                        append(if (kbps < 1) "<1" else kbps.toString())
+                        append(" kbps")
+                    }
                     if (resolved.uploader.isNotEmpty()) {
                         append(" • ")
                         append(resolved.uploader)
@@ -1833,6 +1920,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 binding.audioResult.text = info
                 binding.audioResult.visibility = View.VISIBLE
+                binding.audioStatus.text = "Audio ready — sending to the cloud…"
                 // The audio file is ready (fresh download or reused) —
                 // set the player up so the song can be heard while the
                 // lyrics are fixed.
@@ -1858,6 +1946,7 @@ class MainActivity : AppCompatActivity() {
                     submitted.draftJobId, submitted.jobId
                 )
                 AppLog.d("Main", "Draft submitted: job=${submitted.jobId} draft=${submitted.draftJobId}")
+                binding.audioStatus.text = ""
                 binding.draftStatus.text = "Queued — waiting for the GPU…"
                 // Poll for the result. A single failed poll (a DNS blip,
                 // a dropped signal) must NOT kill the flow — the job is
@@ -1898,17 +1987,21 @@ class MainActivity : AppCompatActivity() {
                     } catch (_: IOException) {
                         null // Progress is nice-to-have; the job status decides.
                     }
+                    val waited = (System.currentTimeMillis() - draftWaitStart) / 1000
                     if (progress != null) {
                         binding.draftStatus.text = buildString {
-                            append(progress.stage)
+                            append(progress.stage.ifEmpty { "Working" })
                             append(" — ")
                             append(progress.pct)
                             append("%")
+                            append(" (${waited}s)")
                             if (progress.detail.isNotEmpty()) {
                                 append("\n")
                                 append(progress.detail)
                             }
                         }
+                    } else {
+                        binding.draftStatus.text = "Queued on the GPU — ${waited}s elapsed"
                     }
                     when (job.status) {
                         "done" -> {
@@ -1952,6 +2045,13 @@ class MainActivity : AppCompatActivity() {
                 showError("Couldn't reach the backend — check the URL and your connection.")
                 binding.audioStatus.text = ""
             } catch (e: Exception) {
+                if (userCancelled) {
+                    userCancelled = false
+                    AppLog.d("Main", "Cancelled — no error shown")
+                    binding.audioStatus.text = "Cancelled."
+                    binding.draftStatus.text = ""
+                    return@launch
+                }
                 AppLog.e("Main", "Failed: ${e.message}")
                 showError("Something went wrong: ${e.message}")
                 binding.audioStatus.text = ""
@@ -1979,6 +2079,7 @@ class MainActivity : AppCompatActivity() {
         callId: String,
         songTitle: String
     ) {
+        editorFromJobs = false
         if (result == null) {
             AppLog.e("Main", "Draft done but the backend sent no result")
             showError("The backend finished but sent no result. Try again.")
@@ -2037,6 +2138,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onCancel() {
+        userCancelled = true
         flowJob?.cancel()
         flowJob = null
         val jobId = currentJobId

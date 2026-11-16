@@ -41,7 +41,7 @@
     <string name="editor_next">Next ▶</string>
     <!-- One line on a phone screen (47 chars, 12sp — see the layout):
          tap to play, DOUBLE-TAP to edit, drag to move/resize. -->
-    <string name="editor_words_hint">Tap to play · double-tap to edit · drag to move</string>
+    <string name="editor_words_hint">Tap a word to play · double-tap to edit · drag word blocks on the waveform to retime</string>
     <!-- "2nd voice" (backing vocals) for the render, matching the
          desktop editor: a checkbox (checked by default) + a volume
          slider 0-200 (default 100). The render sends
